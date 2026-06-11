@@ -10,6 +10,7 @@ from tyrano_tools.ks.io import read_ks_lines
 from tyrano_tools.scenario.traversal import (
     DEFAULT_EXCLUDED_FILES,
     WarningRecord,
+    detect_preview_entry,
     discover_reachable_files,
     is_system_storage,
     resolve_entry_file,
@@ -42,7 +43,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--entry",
         default=None,
-        help="Override the default entry .ks file inside the scenario directory",
+        help=(
+            "Override the default entry .ks file inside the scenario "
+            "directory. Use this when TyranoBuilder's 'Preview from here' "
+            "feature has replaced first.ks with a _preview.ks jump (for "
+            "example pass --entry title_screen.ks)."
+        ),
     )
     parser.add_argument(
         "-c",
@@ -131,6 +137,10 @@ def discover_reachable_files_depth_first(
     seen: set[Path] = set()
     scenario_files = {path.resolve() for path in scenario_dir.glob("*.ks")}
     entry_resolved = entry_file.resolve()
+
+    preview_warning = detect_preview_entry(entry_file)
+    if preview_warning is not None:
+        warnings.append(preview_warning)
 
     def visit(current: Path) -> None:
         current = current.resolve()

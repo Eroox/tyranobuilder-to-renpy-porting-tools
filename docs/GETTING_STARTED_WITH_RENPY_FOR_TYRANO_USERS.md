@@ -96,7 +96,13 @@ You need to run the scripts from inside the extracted toolkit folder.
 
 Examples:
 
-- Windows: open Command Prompt or PowerShell in the extracted folder
+- Windows: open the extracted folder in File Explorer, then either:
+  1. Click the address bar at the top of the window, type `cmd`, and press
+     Enter to open Command Prompt already pointed at the folder. Or type
+     `powershell` instead to open PowerShell.
+  2. Or hold the Shift key, right-click an empty area inside the folder, and
+     choose "Open PowerShell window here" (or "Open in Terminal" on
+     newer Windows versions).
 - macOS: open Terminal and `cd` into the folder
 - Linux: open your terminal and `cd` into the folder
 
@@ -247,22 +253,33 @@ Its job is to:
 
 This is a good choice when you want to experiment with one scene or chapter.
 
-## If You Want Reachable Story Flow From A Whole Project
+## If You Want The Fullest Current Project Scaffold (Recommended For Whole Projects)
 
 Use:
 
-- `tyranobuilder_scenario_to_renpy_script_converter.py`
+- `tyranobuilder_to_renpy_project.py`
 
-This tool:
+This is the highest-level tool in the repo and the recommended starting point
+for almost every whole-project migration.
 
-- starts from a TyranoBuilder project root or `data/scenario/`
-- uses `first.ks` as the default starting point when present
-- follows reachable non-system `.ks` files
-- skips `system/` references during traversal
-- rewrites `game/script.rpy` so Ren'Py can skip its built-in main menu and start inside the converted Tyrano flow
-- can move a startup-only intro movie into Ren'Py `splashscreen` when the title flow clearly looks like "play intro once, then show title menu"
+It:
 
-This is the better choice when you want story flow across multiple files.
+- calls the scenario converter automatically
+- reads `data/system/Config.tjs`
+- generates `options.rpy`, `gui.rpy`, and `screens.rpy`
+- generates `keymap.rpy` for safe partial Tyrano keymap import
+- creates empty target asset directories
+- writes media/config planning docs
+- rewrites startup flow so the converted Tyrano title/menu can replace Ren'Py's stock main menu
+- can promote a startup-only intro movie into Ren'Py `splashscreen` when that looks safe from the converted title structure
+
+Current keymap behavior is intentionally conservative:
+
+- `Escape` stays the Ren'Py menu key
+- more unusual Tyrano input behavior such as virtual mouse, gesture, and advanced gamepad mappings is still deferred
+
+If you want the strongest current starting point for a whole project, this is
+the tool to use.
 
 ## If You Want One Merged `.ks` File From A Whole Project
 
@@ -283,33 +300,45 @@ This tool:
 This is useful when you want a single combined Tyrano script for review,
 searching, or feeding into another single-file workflow.
 
-## If You Want The Fullest Current Project Scaffold
+## If You Want Only Story Script `.rpy` Files (Advanced)
+
+> **Most users should NOT use this tool. Use `tyranobuilder_to_renpy_project.py` instead.**
+>
+> This tool produces an incomplete Ren'Py game folder that will not launch
+> correctly on its own. It exists for advanced workflows where you already
+> have customized `options.rpy`, `gui.rpy`, `screens.rpy`, and `keymap.rpy`
+> and only want to regenerate the story flow.
 
 Use:
 
-- `tyranobuilder_to_renpy_project.py`
+- `tyranobuilder_scenario_to_renpy_script_converter.py`
 
-This is the highest-level tool in the repo right now.
+**What it reads:**
 
-It:
+- a TyranoBuilder project root, or a `data/scenario/` folder directly
+- the reachable non-system `.ks` files starting from `first.ks` (or `--entry`)
 
-- calls the scenario converter automatically
-- reads `data/system/Config.tjs`
-- generates `options.rpy`, `gui.rpy`, and `screens.rpy`
-- generates `keymap.rpy` for safe partial Tyrano keymap import
-- creates empty target asset directories
-- writes media/config planning docs
-- rewrites startup flow so the converted Tyrano title/menu can replace Ren'Py's stock main menu
-- can promote a startup-only intro movie into Ren'Py `splashscreen` when that looks safe from the converted title structure
+**What it produces:**
 
-Current keymap behavior is intentionally conservative:
+- `out/game/script.rpy` (Ren'Py startup wiring)
+- `out/game/story/*.rpy` (per-source-file converted scenes)
+- `out/game/characters.rpy`
+- `out/game/images.rpy`
+- `out/game/transitions.rpy`
+- `out/game/route_map.md`
+- `out/game/conversion_warnings.md`
 
-- `Escape` stays the Ren'Py menu key
-- right-click can be imported as save during gameplay
-- more unusual Tyrano input behavior such as virtual mouse, gesture, and advanced gamepad mappings is still deferred
+**What it does NOT produce:**
 
-If you want the strongest current starting point for a whole project, this is
-usually the best tool to try first.
+- `options.rpy`, `gui.rpy`, `screens.rpy`, `keymap.rpy`
+- `NEEDED_MEDIA.md`, `ASSET_MIGRATION_PLAN.md`, `PROJECT_CONFIG_MAPPING.md`,
+  `DIRECTORY_SCAFFOLD.md`
+- empty asset directories
+
+If you copy only this tool's output into a Ren'Py project, critical config
+files will be missing and the game will not launch correctly. Use
+`tyranobuilder_to_renpy_project.py` instead unless you have a specific reason
+to regenerate only the story flow.
 
 ## Step 6: Understand What The Tools Generate
 
@@ -389,7 +418,34 @@ It tells you:
 
 Do not skip this file.
 
-## Scenario-converter output
+## Project-builder output (recommended)
+
+When you run:
+
+```bash
+python3 tyranobuilder_to_renpy_project.py path/to/your-project -o out
+```
+
+you get the fullest scaffold, including:
+
+- `out/game/script.rpy`
+- `out/game/story/...`
+- `out/game/options.rpy`
+- `out/game/gui.rpy`
+- `out/game/screens.rpy`
+- `out/game/keymap.rpy`
+- `out/game/characters.rpy`
+- `out/game/images.rpy`
+- `out/game/transitions.rpy`
+- `out/game/PROJECT_CONFIG_MAPPING.md`
+- `out/game/NEEDED_MEDIA.md`
+- `out/game/NEEDED_MEDIA_RAW.json`
+- `out/game/ASSET_MIGRATION_PLAN.md`
+- `out/game/DIRECTORY_SCAFFOLD.md`
+
+This is the best current output for a whole project.
+
+## Scenario-converter output (advanced; partial scaffold)
 
 When you run:
 
@@ -407,34 +463,154 @@ you get a generated `game/` scaffold that includes:
 - `out/game/route_map.md`
 - `out/game/conversion_warnings.md`
 
-This is the tool to use when your TyranoBuilder project is split across several
-reachable `.ks` files.
+> **Note:** this output is missing `options.rpy`, `gui.rpy`, `screens.rpy`, and
+> `keymap.rpy`. A Ren'Py game built only from this output will typically fail
+> to launch correctly. Use `tyranobuilder_to_renpy_project.py` (above) to get
+> the full set, unless you have a specific reason to regenerate only the story
+> flow.
 
-## Project-builder output
+## Common Pitfall: TyranoBuilder "Preview From Here" Replaces `first.ks`
 
-When you run:
+When you click "Preview from here" inside the TyranoBuilder editor,
+TyranoBuilder writes a `_preview.ks` file and rewrites `first.ks` so the
+in-editor preview launcher can start mid-scene. If you then export, copy, or
+hand off that project without restoring `first.ks`, every tool in this
+toolkit that walks the scenario from the default entry point will only see
+the tiny preview snippet, not your real game.
+
+This affects:
+
+- `tyranobuilder_to_renpy_project.py`
+- `tyranobuilder_scenario_to_renpy_script_converter.py`
+- `tyranobuilder_scenario_to_single_ks_file.py`
+
+When the converters detect this, they emit a `preview_entry_detected`
+warning inside the generated warnings report (`conversion_warnings.md` for
+the project builder and scenario converter, `merge_warnings.md` for the
+single-`.ks` merger). Open that file first if your generated output looks
+unexpectedly small or only covers a single scene.
+
+Two ways to recover:
+
+1. Re-export your TyranoBuilder project so `first.ks` is restored to its
+   bootstrap state, then re-run the converter.
+2. Or pass `--entry title_screen.ks` (or whatever your real entry file is
+   named) to skip the preview artifact, for example:
 
 ```bash
-python3 tyranobuilder_to_renpy_project.py path/to/your-project -o out
+python3 tyranobuilder_to_renpy_project.py path/to/your-project --entry title_screen.ks
 ```
 
-you get a fuller scaffold, including:
+Note that bypassing `first.ks` also skips its system-library bootstrap
+(layer setup, character defines, plugins). The converter already filters
+`system/*.ks` out of traversal, so the bootstrap was not contributing
+scenario content, but if you have any non-system setup inside `first.ks` you
+will need to move it into your overriding entry file.
 
-- `out/game/script.rpy`
-- `out/game/story/...`
-- `out/game/options.rpy`
-- `out/game/gui.rpy`
-- `out/game/screens.rpy`
-- `out/game/characters.rpy`
-- `out/game/images.rpy`
-- `out/game/transitions.rpy`
-- `out/game/PROJECT_CONFIG_MAPPING.md`
-- `out/game/NEEDED_MEDIA.md`
-- `out/game/NEEDED_MEDIA_RAW.json`
-- `out/game/ASSET_MIGRATION_PLAN.md`
-- `out/game/DIRECTORY_SCAFFOLD.md`
+Once your project is migrated, see
+[How To Preview A Specific Scene In Ren'Py](#how-to-preview-a-specific-scene-in-renpy)
+below for Ren'Py's equivalent workflows.
 
-This is the best current output for a whole project.
+## How To Preview A Specific Scene In Ren'Py
+
+If you came from TyranoBuilder, you may miss the right-click "Preview from
+here" workflow once you are inside Ren'Py. Ren'Py does not have a single
+equivalent button, but it ships three official mechanisms that together
+cover the same goal. The `preview_entry_detected` warning above is about
+Tyrano-side preview leakage into the conversion; this section is about how
+to reach the equivalent workflow inside Ren'Py once your project is
+converted.
+
+All three workflows require developer mode (`config.developer = True`).
+Ren'Py defaults `config.developer` to `"auto"`, which means it is on
+automatically when you launch your project from the Ren'Py launcher during
+development, and off automatically in built distributions. The generated
+`options.rpy` does not override that default, so you get developer mode
+for free while you are working and lose it for free when you ship.
+
+### 1. Shift+O Console: Jump To Any Label
+
+Press `Shift+O` while the game is running to open Ren'Py's debug console,
+then type:
+
+```
+jump some_label_name
+```
+
+This is the closest match for "preview from here" when your scene boundary
+lines up with a label. Our converters generate labels per source file and
+per Tyrano `*labelname`, so most converted scenes are reachable this way.
+
+The console also supports `reload`, `load <slot>`, `save <slot>`,
+`watch <expression>`, and arbitrary Python expressions. The full command
+list is in Ren'Py's Developer Tools documentation at
+`https://www.renpy.org/doc/html/developer_tools.html`.
+
+### 2. `--warp` From The Command Line: Line-Precise Preview
+
+Launch Ren'Py from the command line with the `--warp` flag pointing at a
+file and line number:
+
+```bash
+renpy.exe path/to/your-project --warp game/story/chapter2.rpy:140
+```
+
+On macOS or Linux, use `renpy.sh` from your Ren'Py SDK folder instead of
+`renpy.exe`. The Ren'Py launcher GUI does not currently expose `--warp`,
+so this workflow is command-line only.
+
+Ren'Py finds the closest reachable statement at or before that line, walks
+back through `scene`, `show`, and `hide` statements until it finds a
+`scene` statement, executes that path, then transfers control to the
+warped-to statement. This is the closest mechanical analogue to "Preview
+from here", but it has real caveats.
+
+Important caveats, taken from Ren'Py's own documentation:
+
+- It only examines a single path, so it may miss bugs along other routes.
+- The path does not consider game logic, so it is possible to land on a
+  statement that is not actually reachable in normal play.
+- Python is not executed before the warped-to statement, so all variables
+  will be uninitialized and the game can crash when they are used.
+
+To work around the variable problem, define an `after_warp` label that
+initializes the variables your previewed scene needs. Ren'Py calls it
+after the warp but before the warped-to statement:
+
+```renpy
+label after_warp:
+    $ player_name = "Velo"
+    $ chapter = 2
+    return
+```
+
+### 3. Shift+R Reload: Tight Edit-Test Loop
+
+While the game is running, `Shift+R` saves, reloads the script, and
+resumes from approximately the last unchanged statement. After the first
+reload, Ren'Py enters autoreload mode and reloads again on any future
+script-file change. This is the workflow you want when you are editing
+dialogue or fixing small mistakes and want to see the result without
+manually relaunching.
+
+One gotcha: game state (variable values, shown images, queued audio, and
+so on) is preserved across the reload. If your edit changed an earlier
+statement, you may need to roll back past that statement so the new
+version actually runs.
+
+`Shift+R` reloading does not work during a replay.
+
+### Developer Menu
+
+Pressing `Shift+D` opens the Ren'Py Developer Menu, which is a UI
+front-end for several of the tools above. It is convenient if you do not
+want to memorize individual shortcuts.
+
+### Sources
+
+- Ren'Py Developer Tools: `https://www.renpy.org/doc/html/developer_tools.html`
+- Customizing the Keymap (default key bindings): `https://www.renpy.org/doc/html/keymap.html`
+- Labels & Control Flow (`after_warp` special label): `https://www.renpy.org/doc/html/label.html`
 
 ## Important Note About Output Folders
 

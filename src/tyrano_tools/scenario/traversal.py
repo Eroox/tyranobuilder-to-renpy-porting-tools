@@ -10,6 +10,7 @@ from tyrano_tools.scenario.shared import WarningRecord
 
 TRAVERSAL_TAGS = {"jump", "call", "button", "link", "glink", "clickable"}
 DEFAULT_EXCLUDED_FILES = {"config.ks", "make.ks"}
+PREVIEW_FILENAMES = {"_preview.ks"}
 
 
 @dataclass
@@ -95,6 +96,57 @@ def scan_references(path: Path) -> list[TraversalReference]:
     return references
 
 
+def detect_preview_entry(entry_file: Path) -> WarningRecord | None:
+    """
+    Return a warning when the resolved entry file is a TyranoBuilder
+    "Preview from here" artifact, or jumps/calls into one.
+
+    TyranoBuilder's editor writes `_preview.ks` (and rewrites `first.ks` to
+    jump into it) when a user clicks the "Preview from here" button so the
+    in-editor preview launcher can start mid-scene. If that state is exported
+    or copied without restoring `first.ks`, the converter will only walk the
+    tiny preview snippet and miss the rest of the game.
+
+    The check is filename-only on purpose: it catches both the "entry IS
+    `_preview.ks`" case and the "entry traverses into `_preview.ks`" case
+    without guessing at file contents.
+    """
+    if entry_file.name in PREVIEW_FILENAMES:
+        return WarningRecord(
+            source_path=entry_file,
+            line_number=1,
+            category="preview_entry_detected",
+            message=(
+                f"Resolved entry file is a TyranoBuilder 'Preview from here' "
+                f"artifact: `{entry_file.name}`. The converter will only walk "
+                "what this preview snippet reaches, which is usually a tiny "
+                "subset of the real game. Restore `first.ks` from a fresh "
+                "TyranoBuilder export, or pass `--entry title_screen.ks` (or "
+                "your actual entry .ks file) to override."
+            ),
+        )
+
+    for ref in scan_references(entry_file):
+        if ref.storage and Path(ref.storage).name in PREVIEW_FILENAMES:
+            return WarningRecord(
+                source_path=ref.source_path,
+                line_number=ref.line_number,
+                category="preview_entry_detected",
+                message=(
+                    f"Entry file `{entry_file.name}` reaches a TyranoBuilder "
+                    "'Preview from here' artifact via "
+                    f"`[{ref.tag_name}]` with storage=`{ref.storage}`. The "
+                    "converter will only walk what the preview snippet "
+                    "reaches, which is usually a tiny subset of the real "
+                    "game. Restore `first.ks` from a fresh TyranoBuilder "
+                    "export, or pass `--entry title_screen.ks` (or your "
+                    "actual entry .ks file) to override."
+                ),
+            )
+
+    return None
+
+
 def discover_reachable_files(
     scenario_dir: Path,
     entry_file: Path,
@@ -104,6 +156,10 @@ def discover_reachable_files(
     queue: deque[Path] = deque([entry_file.resolve()])
     seen: set[Path] = set()
     scenario_files = {path.resolve() for path in scenario_dir.glob("*.ks")}
+
+    preview_warning = detect_preview_entry(entry_file)
+    if preview_warning is not None:
+        warnings.append(preview_warning)
 
     while queue:
         current = queue.popleft()

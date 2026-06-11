@@ -32,6 +32,7 @@ from tyrano_tools.scenario.shared import (
     append_line,
     build_label_name,
     build_quake_transitions_file,
+    build_transition_clause,
     consume_block_comment_line,
     finalize_script_block,
     handle_common_audio_or_message_tag,
@@ -297,6 +298,12 @@ def handle_visual_event(
                 indent_level,
                 f'# TODO TYRANO: missing background mapping for "{escape_string(event.storage)}"',
             )
+        transition_clause = build_transition_clause(
+            event.transition_method,
+            event.transition_time_ms,
+        )
+        if transition_clause:
+            append_line(lines, indent_level, f"with {transition_clause}")
         return indent_level
 
     if isinstance(event, CharacterShowEvent):
@@ -310,6 +317,9 @@ def handle_visual_event(
                 indent_level,
                 f'# TODO TYRANO: missing character mapping for "{escape_string(event.storage)}"',
             )
+        transition_clause = build_transition_clause(None, event.transition_time_ms)
+        if transition_clause:
+            append_line(lines, indent_level, f"with {transition_clause}")
         return indent_level
 
     if not isinstance(event, CharacterHideEvent):
@@ -329,6 +339,9 @@ def handle_visual_event(
             "approximate_staging",
             "Approximated [chara_hide_all] as `scene black`; review final staging intent.",
         )
+    transition_clause = build_transition_clause(None, event.transition_time_ms)
+    if transition_clause:
+        append_line(lines, indent_level, f"with {transition_clause}")
     return indent_level
 
 

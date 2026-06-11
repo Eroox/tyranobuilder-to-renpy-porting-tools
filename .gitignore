@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.nox/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# exported media
+out/
+*_out/

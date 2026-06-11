@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-__version__ = "0.3.0"
+__version__ = "0.4.2"
 
 
 def add_version_argument(parser: argparse.ArgumentParser) -> None:

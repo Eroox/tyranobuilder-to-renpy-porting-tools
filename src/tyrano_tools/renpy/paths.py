@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
 
 def normalize_identifier(value: str, prefix: str = "id") -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower())
+    # function lowercases ``value``, replaces any non-ASCII-alphanumeric
+    # run with a single underscore, and trims leading/trailing underscores.
+    # When the resulting slug is empty a deterministic suffix
+    # derived from the SHA-1 hash of the original stripped input is appended
+    #   to ``prefix`` to form a distinct identifier.
+    stripped_value = value.strip()
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", stripped_value.lower())
     normalized = re.sub(r"_+", "_", normalized).strip("_")
     if not normalized:
-        normalized = prefix
+        # Input had no ASCII alphanumerics. Without a deterministic suffix
+        # every such input would collapse to ``prefix`` and collide with
+        # every other non-ASCII input that shares the prefix.
+        digest = hashlib.sha1(stripped_value.encode("utf-8")).hexdigest()[:8]
+        normalized = f"{prefix}_{digest}"
     if normalized.startswith("00"):
         normalized = f"{prefix}_{normalized}"
     if not normalized[0].isalnum():

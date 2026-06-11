@@ -36,7 +36,7 @@ from tyrano_tools.scenario.traversal import (
 from tyrano_tools.version import add_version_argument
 
 PROJECT_OUTPUT_DIRNAME = "game"
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 ASSET_DIRECTORIES = [
     "images/backgrounds",
@@ -358,7 +358,12 @@ def build_keymap_rpy(keyconfig: Optional[Dict[str, Any]]) -> tuple[str, Dict[str
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a Ren'Py project scaffold from a TyranoBuilder project.",
+        description=(
+            "Build a full Ren'Py project scaffold from a TyranoBuilder project. "
+            "Recommended starting point for whole-project migrations. Generates "
+            "story scripts plus options.rpy, gui.rpy, screens.rpy, keymap.rpy, "
+            "empty asset directories, and migration planning docs."
+        ),
     )
     add_version_argument(parser)
     parser.add_argument("input", type=Path, help="Path to a TyranoBuilder project root")
@@ -372,7 +377,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--entry",
         default=None,
-        help="Override the default entry .ks file inside data/scenario",
+        help=(
+            "Override the default entry .ks file inside data/scenario. Use "
+            "this when TyranoBuilder's 'Preview from here' feature has "
+            "replaced first.ks with a _preview.ks jump (for example pass "
+            "--entry title_screen.ks)."
+        ),
     )
     return parser.parse_args()
 
@@ -1479,8 +1489,8 @@ def build_startup_script(startup_plan: StartupPlan) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def load_template(project_root: Path, relative_path: str) -> str:
-    template_path = project_root / relative_path
+def load_template(template_name: str) -> str:
+    template_path = TEMPLATES_DIR / template_name
     if not template_path.exists():
         raise FileNotFoundError(f"Template file not found: {template_path}")
     return template_path.read_text(encoding="utf-8-sig")
@@ -1488,14 +1498,13 @@ def load_template(project_root: Path, relative_path: str) -> str:
 
 def write_project_files(
     game_dir: Path,
-    project_root: Path,
     settings: Dict[str, Any],
     startup_plan: StartupPlan,
     keyconfig: Optional[Dict[str, Any]],
 ) -> List[Path]:
-    options_template = load_template(project_root, "examples/RenpyDefaultGame/game/options.rpy")
-    gui_template = load_template(project_root, "examples/RenpyDefaultGame/game/gui.rpy")
-    screens_template = load_template(project_root, "examples/RenpyDefaultGame/game/screens.rpy")
+    options_template = load_template("options.rpy")
+    gui_template = load_template("gui.rpy")
+    screens_template = load_template("screens.rpy")
 
     options_path = game_dir / "options.rpy"
     options_path.write_text(build_options_rpy(options_template, settings), encoding="utf-8")
@@ -1545,9 +1554,7 @@ def build_project(input_path: Path, output_dir: Path, explicit_entry: Optional[s
     keyconfig = parse_keyconfig_js(project_root / "data" / "system" / "KeyConfig.js")
     startup_plan = determine_startup_plan(parsed_files, entry_parsed_file)
     _, keymap_report = build_keymap_rpy(keyconfig)
-    written_paths.extend(
-        write_project_files(game_dir, REPOSITORY_ROOT, settings, startup_plan, keyconfig)
-    )
+    written_paths.extend(write_project_files(game_dir, settings, startup_plan, keyconfig))
 
     inventory = merge_inventory(reachable_files)
     media_doc_path = game_dir / "NEEDED_MEDIA.md"

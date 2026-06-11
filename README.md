@@ -21,7 +21,7 @@ You do not need Git to use this toolkit.
 
 1. Download this repository as a ZIP from GitHub.
 2. Extract the ZIP somewhere easy to find.
-3. Make a copy of your TyranoBuilder project.
+3. Make a copy of your TyranoBuilder project, best if copy is in this toolkit folder!
 4. Install Python from `https://www.python.org/downloads/`.
 5. Open a terminal in this toolkit folder.
 6. Run the tool that matches your migration task.
@@ -55,15 +55,41 @@ python3 some_script.py -V
 
 | Goal | Tool |
 | --- | --- |
+| Build the fullest current Ren'Py project scaffold (recommended starting point) | `tyranobuilder_to_renpy_project.py` |
 | Read or proofread one `.ks` file | `single_ks_file_to_screenplay_converter.py` |
 | List media referenced by a `.ks` file | `extract_media_inventory.py` |
 | Prepare Tyrano movie files for Ren'Py | `prepare_movies_for_renpy.py` |
-| Convert one `.ks` file into a Ren'Py scaffold | `single_ks_file_to_renpy_script_converter.py` |
-| Convert reachable story flow from a TyranoBuilder project | `tyranobuilder_scenario_to_renpy_script_converter.py` |
+| Convert one `.ks` file into a Ren'Py scaffold (single-file experiment) | `single_ks_file_to_renpy_script_converter.py` |
 | Merge reachable scenario flow into one `.ks` file | `tyranobuilder_scenario_to_single_ks_file.py` |
-| Build the fullest current Ren'Py project scaffold | `tyranobuilder_to_renpy_project.py` |
+| Generate ONLY story `.rpy` files without `options.rpy` / `gui.rpy` / `screens.rpy` / `keymap.rpy` (advanced) | `tyranobuilder_scenario_to_renpy_script_converter.py` |
 
 ## Tool Summary
+
+### `tyranobuilder_to_renpy_project.py`
+
+**Recommended starting point for whole-project migrations.**
+
+Builds the fullest current Ren'Py project scaffold. It calls the scenario
+converter internally, reads safe TyranoBuilder project config from
+`data/system/Config.tjs` and `data/system/KeyConfig.js`, creates starter Ren'Py
+files, creates empty target asset directories, and writes planning reports for
+remaining asset and config work.
+
+Output includes:
+
+- `out/game/script.rpy` (Ren'Py startup wiring)
+- `out/game/story/*.rpy` (per-source-file converted scenes)
+- `out/game/characters.rpy`, `out/game/images.rpy`, `out/game/transitions.rpy`
+- `out/game/options.rpy` (Ren'Py config, build name, save directory)
+- `out/game/gui.rpy` (UI styling and dimensions)
+- `out/game/screens.rpy` (say, menu, quick-menu, file-picker screens)
+- `out/game/keymap.rpy` (safe partial Tyrano keymap import)
+- `out/game/NEEDED_MEDIA.md`, `out/game/NEEDED_MEDIA_RAW.json`
+- `out/game/ASSET_MIGRATION_PLAN.md`, `out/game/PROJECT_CONFIG_MAPPING.md`
+- `out/game/DIRECTORY_SCAFFOLD.md`
+- empty asset directories under `out/game/images/`, `out/game/audio/`, etc.
+
+This is the right tool for almost every whole-project migration scenario.
 
 ### `single_ks_file_to_screenplay_converter.py`
 
@@ -75,6 +101,8 @@ Converts one TyranoBuilder `.ks` file into readable text formats:
 
 Good for proofreading, translation prep, and reading dialogue outside
 TyranoBuilder.
+
+> Tip: use `tyranobuilder_scenario_to_single_ks_file.py` to convert you entire project into one ks file so you have a single screenplay
 
 ### `extract_media_inventory.py`
 
@@ -91,7 +119,7 @@ This helper requires `ffmpeg`. Check your install with:
 ffmpeg -version
 ```
 
-If that command fails, install `ffmpeg` first. The getting-started guide includes
+If that command fails, install `ffmpeg` first. The GETTING_STARTED guide includes
 more beginner-friendly setup notes.
 
 ### `single_ks_file_to_renpy_script_converter.py`
@@ -100,31 +128,62 @@ Converts one `.ks` file into a starter Ren'Py `game/` scaffold. This is useful
 for testing one scene, chapter, or isolated script before trying a larger
 project migration.
 
-### `tyranobuilder_scenario_to_renpy_script_converter.py`
-
-Converts reachable scenario flow from a TyranoBuilder project root or
-`data/scenario/` folder. It follows reachable non-system `.ks` files and writes a
-script-focused Ren'Py scaffold.
-
 ### `tyranobuilder_scenario_to_single_ks_file.py`
 
 Follows reachable scenario flow and writes one merged `.ks` file while keeping
 source-file boundaries visible. This is useful for review, searching, or feeding
 the result into another single-file workflow.
 
-### `tyranobuilder_to_renpy_project.py`
+### `tyranobuilder_scenario_to_renpy_script_converter.py`
 
-Builds the fullest current Ren'Py project scaffold. It calls the scenario
-converter, reads safe TyranoBuilder project config, creates starter Ren'Py files,
-and writes planning reports for remaining asset and config work.
+> **Most users should NOT use this tool. Use `tyranobuilder_to_renpy_project.py` instead.**
+>
+> This tool produces an incomplete Ren'Py game folder that will not launch
+> correctly on its own. It is intended for advanced workflows where you
+> already have customized `options.rpy`, `gui.rpy`, `screens.rpy`, and
+> `keymap.rpy` and only want to regenerate the story flow.
 
-This is usually the best first tool to try for a whole-project migration.
+**What it reads:**
+
+- a TyranoBuilder project root, or a `data/scenario/` folder directly
+- the reachable non-system `.ks` files starting from `first.ks` (or `--entry`)
+
+**What it produces:**
+
+- `out/game/script.rpy` (Ren'Py startup wiring)
+- `out/game/story/*.rpy` (per-source-file converted scenes)
+- `out/game/characters.rpy`
+- `out/game/images.rpy`
+- `out/game/transitions.rpy`
+- `out/game/route_map.md`
+- `out/game/conversion_warnings.md`
+
+**What it does NOT produce (critical):**
+
+- `options.rpy` (Ren'Py config, build name, save directory)
+- `gui.rpy` (UI styling and dimensions)
+- `screens.rpy` (say, menu, quick-menu, file-picker screens)
+- `keymap.rpy` (Tyrano keymap import)
+- `NEEDED_MEDIA.md`, `NEEDED_MEDIA_RAW.json`, `ASSET_MIGRATION_PLAN.md`,
+  `PROJECT_CONFIG_MAPPING.md`, `DIRECTORY_SCAFFOLD.md`
+- empty asset directories under `out/game/images/`, `out/game/audio/`, etc.
+
+Copying only this tool's output into a Ren'Py project will typically leave
+critical configuration missing and the game will not launch correctly. Prefer
+`tyranobuilder_to_renpy_project.py` for beginner and standard whole-project
+workflows.
 
 ## Example Commands
 
 The `examples/...` paths below show the shape of the commands. If your download
 does not include those sample files, replace them with the path to your own
 TyranoBuilder `.ks` file or project folder.
+
+### Full Project Builder (recommended)
+
+```bash
+python3 tyranobuilder_to_renpy_project.py examples/SpinaNovel -o out
+```
 
 ### Screenplay Conversion
 
@@ -142,22 +201,20 @@ python3 single_ks_file_to_screenplay_converter.py examples/TyranoBuilder.ks -o o
 python3 extract_media_inventory.py examples/TyranoBuilder.ks
 ```
 
+### Movie Preparation For Ren'Py
+
+```bash
+python3 prepare_movies_for_renpy.py path/to/your-project
+```
+
+```bash
+python3 prepare_movies_for_renpy.py path/to/your-project/data/video -o game/movies
+```
+
 ### Single-File Ren'Py Conversion
 
 ```bash
 python3 single_ks_file_to_renpy_script_converter.py examples/TyranoBuilder.ks -o out
-```
-
-### Scenario Conversion From A Project
-
-```bash
-python3 tyranobuilder_scenario_to_renpy_script_converter.py examples/SpinaNovel -o out
-```
-
-### Full Project Builder
-
-```bash
-python3 tyranobuilder_to_renpy_project.py examples/SpinaNovel -o out
 ```
 
 ### Merge Reachable Scenario Flow Into One `.ks`
@@ -174,14 +231,14 @@ python3 tyranobuilder_scenario_to_single_ks_file.py path/to/your-project -c "The
 python3 tyranobuilder_scenario_to_single_ks_file.py path/to/your-project --order sorted
 ```
 
-### Movie Preparation For Ren'Py
+### Scenario-Only Conversion (advanced)
+
+Only use this if you specifically want story `.rpy` files without
+`options.rpy` / `gui.rpy` / `screens.rpy` / `keymap.rpy`. For a complete
+scaffold use `tyranobuilder_to_renpy_project.py` above.
 
 ```bash
-python3 prepare_movies_for_renpy.py path/to/your-project
-```
-
-```bash
-python3 prepare_movies_for_renpy.py path/to/your-project/data/video -o game/movies
+python3 tyranobuilder_scenario_to_renpy_script_converter.py examples/SpinaNovel -o out
 ```
 
 ## Output Folders
@@ -209,6 +266,50 @@ Generated Ren'Py output is a starting point. Review `conversion_warnings.md`,
 copy required assets, test in a fresh Ren'Py project, and fix issues one at a
 time.
 
+## Common Pitfalls
+
+### TyranoBuilder "Preview From Here" Replaces `first.ks`
+
+When you click "Preview from here" inside the TyranoBuilder editor,
+TyranoBuilder writes a `_preview.ks` file and rewrites `first.ks` so the
+in-editor preview launcher can start mid-scene. If you then export, copy, or
+hand off that project without restoring `first.ks`, every tool that walks the
+scenario from the default entry point will only see the tiny preview snippet,
+not your real game.
+
+Affected tools (anything that starts from `first.ks`):
+
+- `tyranobuilder_to_renpy_project.py`
+- `tyranobuilder_scenario_to_renpy_script_converter.py`
+- `tyranobuilder_scenario_to_single_ks_file.py`
+
+When this happens, the converters now emit a `preview_entry_detected` warning
+inside the generated warnings report (`conversion_warnings.md` for the project
+builder and scenario converter, `merge_warnings.md` for the single-`.ks`
+merger). Open that file first if your generated output looks unexpectedly
+small or only covers a single scene.
+
+Recovery options:
+
+- Re-export your TyranoBuilder project so `first.ks` is restored to its
+  bootstrap state, then re-run the converter.
+- Or pass `--entry title_screen.ks` (or whatever your real entry file is
+  named) to skip the preview artifact, for example:
+
+```bash
+python3 tyranobuilder_to_renpy_project.py path/to/your-project --entry title_screen.ks
+```
+
+Note that bypassing `first.ks` also skips its system-library bootstrap (layer
+setup, character defines, plugins). The converter already filters
+`system/*.ks` out of traversal, so the bootstrap was not contributing
+scenario content, but if you have any non-system setup inside `first.ks` you
+will need to move it into your overriding entry file.
+
+For Ren'Py's equivalent preview workflows once your project is migrated, see
+*How To Preview A Specific Scene In Ren'Py* in
+[`docs/GETTING_STARTED_WITH_RENPY_FOR_TYRANO_USERS.md`](docs/GETTING_STARTED_WITH_RENPY_FOR_TYRANO_USERS.md).
+
 ## Safety Notes
 
 - Keep a backup of your original TyranoBuilder project.
@@ -217,6 +318,14 @@ time.
 - Review warning reports before assuming conversion is finished.
 - Verify font filenames and asset paths manually.
 - If a movie file does not play in Ren'Py, try `prepare_movies_for_renpy.py`.
+
+## Changelog
+
+See [`CHANGELOG.md`](CHANGELOG.md) for release history.
+
+Every user-facing change should add a bullet under `## [Unreleased]`. Before a
+release, rename that section to the new `## [x.y.z] - YYYY-MM-DD` version,
+create a fresh empty `## [Unreleased]` section above it, then tag the release.
 
 ## Related Docs
 

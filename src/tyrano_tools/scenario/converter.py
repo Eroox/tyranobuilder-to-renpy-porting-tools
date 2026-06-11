@@ -37,6 +37,7 @@ from tyrano_tools.scenario.shared import (
     append_line,
     build_label_name,
     build_quake_transitions_file,
+    build_transition_clause,
     consume_block_comment_line,
     finalize_script_block,
     handle_common_audio_or_message_tag,
@@ -113,6 +114,7 @@ SUPPORTED_TAGS = {
     "else",
     "endif",
     "button",
+    "clickable",
     "showload",
     "movie",
     "s",
@@ -133,6 +135,7 @@ class ButtonEvent(ParsedLine):
     width: Optional[int]
     height: Optional[int]
     expression: Optional[str]
+    is_clickable_area: bool = False
 
 
 @dataclass
@@ -457,6 +460,53 @@ def handle_button_tag(
     return True
 
 
+def handle_clickable_tag(
+    parsed_file: ParsedFile,
+    line_number: int,
+    stripped: str,
+    tag_name: str,
+    attrs: dict[str, str],
+    storage: Optional[str],
+) -> bool:
+    if tag_name != "clickable":
+        return False
+
+    expression = attrs.get("exp")
+    if expression:
+        add_warning(
+            parsed_file,
+            line_number,
+            "button_expression_review",
+            (
+                "Tyrano [clickable] exp=... is not executed by the current Ren'Py "
+                "converter and should be reviewed manually."
+            ),
+        )
+    # `_clickable_img` is a TyranoBuilder-only attribute that points at an
+    # optional preview image. When it is empty (the common case), the hotspot
+    # is rendered as a transparent Null displayable in render_button_screen.
+    clickable_graphic = attrs.get("_clickable_img") or None
+    parsed_file.events.append(
+        ButtonEvent(
+            source_path=parsed_file.source_path,
+            line_number=line_number,
+            target_storage=storage,
+            target_label=attrs.get("target"),
+            graphic=clickable_graphic,
+            hover_graphic=None,
+            role=None,
+            name=attrs.get("name"),
+            x=parse_wait_value(attrs.get("x")),
+            y=parse_wait_value(attrs.get("y")),
+            width=parse_wait_value(attrs.get("width")),
+            height=parse_wait_value(attrs.get("height")),
+            expression=expression,
+            is_clickable_area=True,
+        )
+    )
+    return True
+
+
 def handle_movie_or_stop_tag(
     parsed_file: ParsedFile,
     line_number: int,
@@ -536,6 +586,7 @@ def handle_flow_tag(
     return (
         handle_timing_or_jump_tag(parsed_file, line_number, tag_name, attrs, storage)
         or handle_button_tag(parsed_file, line_number, stripped, tag_name, attrs, storage)
+        or handle_clickable_tag(parsed_file, line_number, stripped, tag_name, attrs, storage)
         or handle_movie_or_stop_tag(parsed_file, line_number, stripped, tag_name, attrs)
     )
 
@@ -668,6 +719,7 @@ def button_events_need_visual_screen(button_events: Sequence[ButtonEvent]) -> bo
     return any(
         button_event.graphic
         or button_event.hover_graphic
+        or button_event.is_clickable_area
         or button_event.x is not None
         or button_event.y is not None
         or button_event.width is not None
@@ -684,6 +736,13 @@ def render_button_image_displayable(button_event: ButtonEvent, storage: str) -> 
             f'xysize=({button_event.width}, {button_event.height}), fit="fill")'
         )
     return f'"{remapped_storage}"'
+
+
+def render_clickable_area_displayable(button_event: ButtonEvent) -> str:
+    """Render an invisible hotspot displayable for a [clickable] tag."""
+    width = button_event.width if button_event.width is not None else 0
+    height = button_event.height if button_event.height is not None else 0
+    return f"Null({width}, {height})"
 
 
 def get_label_events(parsed_file: ParsedFile, label_name: Optional[str]) -> Optional[List[Event]]:
@@ -758,6 +817,18 @@ def render_button_screen(
             if button_event.height is not None and button_event.width is None:
                 append_line(lines, indent_level + 1, f"ysize {button_event.height}")
             append_line(lines, indent_level + 1, "focus_mask True")
+            append_line(lines, indent_level + 1, f"action {button_actions[index]}")
+            continue
+
+        if button_event.is_clickable_area:
+            displayable = render_clickable_area_displayable(button_event)
+            append_line(lines, indent_level, "imagebutton:")
+            append_line(lines, indent_level + 1, f"idle {displayable}")
+            append_line(lines, indent_level + 1, f"hover {displayable}")
+            if button_event.x is not None:
+                append_line(lines, indent_level + 1, f"xpos {button_event.x}")
+            if button_event.y is not None:
+                append_line(lines, indent_level + 1, f"ypos {button_event.y}")
             append_line(lines, indent_level + 1, f"action {button_actions[index]}")
             continue
 
@@ -1026,6 +1097,12 @@ def handle_dialogue_or_scene_event(
             state.indent_level,
             f'# TODO TYRANO: missing background mapping for "{escape_string(event.storage)}"',
         )
+    transition_clause = build_transition_clause(
+        event.transition_method,
+        event.transition_time_ms,
+    )
+    if transition_clause:
+        append_line(context.lines, state.indent_level, f"with {transition_clause}")
     state.index += 1
     return True
 
@@ -1060,6 +1137,9 @@ def handle_character_or_audio_event(
                 state.indent_level,
                 f'# TODO TYRANO: missing character mapping for "{escape_string(event.storage)}"',
             )
+        transition_clause = build_transition_clause(None, event.transition_time_ms)
+        if transition_clause:
+            append_line(context.lines, state.indent_level, f"with {transition_clause}")
         state.index += 1
         return True
 
@@ -1076,6 +1156,9 @@ def handle_character_or_audio_event(
                 "approximate_staging",
                 "Approximated [chara_hide_all] as `scene black`; review final staging intent.",
             )
+        transition_clause = build_transition_clause(None, event.transition_time_ms)
+        if transition_clause:
+            append_line(context.lines, state.indent_level, f"with {transition_clause}")
         state.index += 1
         return True
 
@@ -1615,7 +1698,11 @@ def write_outputs(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Convert TyranoBuilder scenario flow into Ren'Py script outputs.",
+        description=(
+            "Convert TyranoBuilder scenario flow into script-only Ren'Py outputs. "
+            "Does NOT produce options.rpy, gui.rpy, screens.rpy, or keymap.rpy. "
+            "For a complete Ren'Py project scaffold use tyranobuilder_to_renpy_project.py."
+        ),
     )
     add_version_argument(parser)
     parser.add_argument(
@@ -1633,7 +1720,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--entry",
         default=None,
-        help="Override the default entry .ks file inside the scenario directory",
+        help=(
+            "Override the default entry .ks file inside the scenario "
+            "directory. Use this when TyranoBuilder's 'Preview from here' "
+            "feature has replaced first.ks with a _preview.ks jump (for "
+            "example pass --entry title_screen.ks)."
+        ),
     )
     return parser.parse_args()
 

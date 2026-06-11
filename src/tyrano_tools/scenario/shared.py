@@ -52,6 +52,8 @@ class DialogueEvent(ParsedLine):
 @dataclass
 class SceneEvent(ParsedLine):
     storage: str
+    transition_time_ms: int = 0
+    transition_method: Optional[str] = None
 
 
 @dataclass
@@ -59,11 +61,13 @@ class CharacterShowEvent(ParsedLine):
     character_name: str
     storage: str
     attributes: dict[str, str]
+    transition_time_ms: int = 0
 
 
 @dataclass
 class CharacterHideEvent(ParsedLine):
     character_name: Optional[str]
+    transition_time_ms: int = 0
 
 
 @dataclass
@@ -240,7 +244,6 @@ def emit_text_events(
 ) -> None:
     fragments = split_text_fragments(text)
     current_parts: List[str] = []
-    saw_click_wait = False
 
     def flush() -> None:
         nonlocal current_parts
@@ -276,28 +279,106 @@ def emit_text_events(
             current_parts.append("\n")
         elif kind == "pause_click":
             current_parts.append("{w}")
-            saw_click_wait = True
         elif kind == "page_break":
             flush()
 
     flush()
-
-    if saw_click_wait:
-        add_warning(
-            parsed_file,
-            line_number,
-            "inline_click_wait",
-            (
-                "Converted [l] to Ren'Py {w} inside dialogue text; [p] still splits "
-                "into a new say block."
-            ),
-        )
 
 
 def parse_bool(value: Optional[str], default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() == "true"
+
+
+# Maps a Tyrano `method=` value to a Ren'Py transition expression.
+# Each entry is `(template, accepts_time_param)`. When the second element is
+# True, `{t}` in the template is substituted with the duration in seconds.
+# When False, the template is a fixed-duration named transition and the Tyrano
+# `time=` value cannot be applied to it.
+TRANSITION_METHOD_MAP: dict[str, tuple[str, bool]] = {
+    # Plain fades (V450+ and V450- naming both fall through to Dissolve).
+    "fadeIn": ("Dissolve({t})", True),
+    "fadeOut": ("Dissolve({t})", True),
+    "crossfade": ("Dissolve({t})", True),
+    # Slide-style entries map to Ren'Py's built-in move-in transitions. Note
+    # that the time parameter is dropped because the built-in transitions use
+    # a fixed duration. Tyrano direction naming: "Left"/"Right" indicates the
+    # edge the new image enters from, while "Up"/"Down" describe the movement
+    # direction, so "Up" enters from the bottom and "Down" from the top.
+    "slideInLeft": ("moveinleft", False),
+    "slideInRight": ("moveinright", False),
+    "slideInUp": ("moveinbottom", False),
+    "slideInDown": ("moveintop", False),
+    "fadeInLeft": ("moveinleft", False),
+    "fadeInRight": ("moveinright", False),
+    "fadeInUp": ("moveinbottom", False),
+    "fadeInDown": ("moveintop", False),
+    "fadeInLeftBig": ("moveinleft", False),
+    "fadeInRightBig": ("moveinright", False),
+    "fadeInUpBig": ("moveinbottom", False),
+    "fadeInDownBig": ("moveintop", False),
+    # Zoom-style entries approximate Tyrano's grow/shrink animation through
+    # Ren'Py's pixellate transition.
+    "zoomIn": ("Pixellate({t}, 5)", True),
+    "zoomInUp": ("Pixellate({t}, 5)", True),
+    "zoomInDown": ("Pixellate({t}, 5)", True),
+    "zoomInLeft": ("Pixellate({t}, 5)", True),
+    "zoomInRight": ("Pixellate({t}, 5)", True),
+    "zoomInUpBig": ("Pixellate({t}, 5)", True),
+    "zoomInDownBig": ("Pixellate({t}, 5)", True),
+    "zoomInLeftBig": ("Pixellate({t}, 5)", True),
+    "zoomInRightBig": ("Pixellate({t}, 5)", True),
+    # Shake-style entries map to Ren'Py's built-in punch transitions (fixed
+    # duration).
+    "shake": ("vpunch", False),
+    # Decorative effects fall through to Dissolve as a safe approximation.
+    "rotateIn": ("Dissolve({t})", True),
+    "rotateInUpLeft": ("Dissolve({t})", True),
+    "rotateInUpRight": ("Dissolve({t})", True),
+    "rotateInDownLeft": ("Dissolve({t})", True),
+    "rotateInDownRight": ("Dissolve({t})", True),
+    "bounceIn": ("Dissolve({t})", True),
+    "bounceInUp": ("Dissolve({t})", True),
+    "bounceInDown": ("Dissolve({t})", True),
+    "bounceInLeft": ("Dissolve({t})", True),
+    "bounceInRight": ("Dissolve({t})", True),
+    "lightSpeedIn": ("Dissolve({t})", True),
+    "vanishIn": ("Dissolve({t})", True),
+    "puffIn": ("Dissolve({t})", True),
+    "rollIn": ("Dissolve({t})", True),
+    # V450- legacy method names.
+    "explode": ("Dissolve({t})", True),
+    "slide": ("moveinright", False),
+    "blind": ("Dissolve({t})", True),
+    "bounce": ("Dissolve({t})", True),
+    "clip": ("Dissolve({t})", True),
+    "drop": ("Dissolve({t})", True),
+    "fold": ("Dissolve({t})", True),
+    "puff": ("Dissolve({t})", True),
+    "scale": ("Dissolve({t})", True),
+    "size": ("Dissolve({t})", True),
+}
+
+
+def build_transition_clause(method: Optional[str], time_ms: int) -> Optional[str]:
+    """Return the Ren'Py expression for a `with` clause, or None to suppress.
+
+    The Tyrano default method is `fadeIn`. When `time_ms` is zero (or
+    negative) the transition is treated as an instant snap and no `with` clause
+    is emitted, matching the runtime behavior of TyranoBuilder. Unknown method
+    names fall back to `Dissolve({t})` so the conversion stays readable.
+    """
+    if time_ms <= 0:
+        return None
+    seconds = time_ms / 1000.0
+    template, accepts_time = TRANSITION_METHOD_MAP.get(
+        method or "fadeIn",
+        ("Dissolve({t})", True),
+    )
+    if accepts_time:
+        return template.format(t=f"{seconds:g}")
+    return template
 
 
 def build_quake_transition_name(axis: str, time_ms: int, count: int, amplitude: int) -> str:
@@ -746,11 +827,15 @@ def handle_common_visual_tag(
             remapped_storage = remap_background_storage(storage)
             bg_name = normalize_identifier(Path(storage).stem, prefix="bg")
             parsed_file.backgrounds[remapped_storage] = bg_name
+            raw_time = parse_wait_value(attrs.get("time"))
+            transition_time_ms = raw_time if raw_time is not None else 3000
             parsed_file.events.append(
                 SceneEvent(
                     source_path=parsed_file.source_path,
                     line_number=line_number,
                     storage=remapped_storage,
+                    transition_time_ms=transition_time_ms,
+                    transition_method=attrs.get("method"),
                 )
             )
         elif warn_on_bg_missing:
@@ -773,6 +858,12 @@ def handle_common_visual_tag(
         remapped_storage = remap_character_storage(storage)
         variant_name = normalize_identifier(Path(storage).stem, prefix="variant")
         parsed_file.character_images[(character_name, remapped_storage)] = variant_name
+        raw_time = parse_wait_value(attrs.get("time"))
+        transition_time_ms = raw_time if raw_time is not None else 1000
+        # [chara_mod] with cross=false is an instant swap regardless of the
+        # nominal time value, so suppress the with clause for that case.
+        if tag_name == "chara_mod" and not parse_bool(attrs.get("cross"), default=True):
+            transition_time_ms = 0
         parsed_file.events.append(
             CharacterShowEvent(
                 source_path=parsed_file.source_path,
@@ -780,6 +871,7 @@ def handle_common_visual_tag(
                 character_name=character_name,
                 storage=remapped_storage,
                 attributes=attrs,
+                transition_time_ms=transition_time_ms,
             )
         )
         ignored_attrs = sorted(attrs.keys() - ignored_attr_keys)
@@ -796,11 +888,14 @@ def handle_common_visual_tag(
         return True
 
     if tag_name == "chara_hide":
+        raw_time = parse_wait_value(attrs.get("time"))
+        transition_time_ms = raw_time if raw_time is not None else 1000
         parsed_file.events.append(
             CharacterHideEvent(
                 source_path=parsed_file.source_path,
                 line_number=line_number,
                 character_name=attrs.get("name"),
+                transition_time_ms=transition_time_ms,
             )
         )
         return True

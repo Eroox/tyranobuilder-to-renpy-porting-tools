@@ -405,9 +405,51 @@ def parse_quake_axes(attrs: dict[str, str]) -> tuple[int, int]:
     return raw_hmax or 0, raw_vmax or 10
 
 
-def build_quake_transitions_file(
+CUSTOM_EFFECTS_HEADER = "# Generated custom Ren'Py effects"
+
+# Two reusable Tyrano-quake ATL transforms, one per axis. Ren'Py's ATL
+# grammar does not allow Python-style ``if axis == "h":`` inside a
+# transform, so the horizontal and vertical shapes are emitted as
+# separate transforms. The generated static aliases below
+# (``tyrano_hpunch_...`` / ``tyrano_vpunch_...``) call the matching
+# helper with their preserved Tyrano parameters. Story files continue
+# to reference the static alias names, so no change to story output is
+# required when a new quake preset is added.
+TYRANO_HQUAKE_TRANSFORM = """\
+transform tyrano_hquake(time_ms=300, count=3, offset=10, *, old_widget=None, new_widget=None):
+    delay (time_ms / 1000.0 * count)
+    new_widget
+    events True
+
+    xoffset 0
+    block:
+        linear (time_ms / 1000.0 / 4.0) xoffset offset
+        linear (time_ms / 1000.0 / 4.0) xoffset -offset
+        linear (time_ms / 1000.0 / 4.0) xoffset offset
+        linear (time_ms / 1000.0 / 4.0) xoffset 0
+        repeat count
+"""  # noqa: E501 (Ren'Py ATL signature must stay on a single line)
+
+TYRANO_VQUAKE_TRANSFORM = """\
+transform tyrano_vquake(time_ms=300, count=3, offset=10, *, old_widget=None, new_widget=None):
+    delay (time_ms / 1000.0 * count)
+    new_widget
+    events True
+
+    yoffset 0
+    block:
+        linear (time_ms / 1000.0 / 4.0) yoffset offset
+        linear (time_ms / 1000.0 / 4.0) yoffset -offset
+        linear (time_ms / 1000.0 / 4.0) yoffset offset
+        linear (time_ms / 1000.0 / 4.0) yoffset 0
+        repeat count
+"""  # noqa: E501 (Ren'Py ATL signature must stay on a single line)
+
+
+def collect_quake_presets(
     parsed_files: Sequence[Any],
-) -> str:
+) -> list[tuple[str, int, int, int]]:
+    """Return sorted, deduplicated (axis, time_ms, count, amplitude) presets."""
     presets: dict[tuple[str, int, int, int], None] = {}
     for parsed_file in parsed_files:
         for event in parsed_file.events:
@@ -418,31 +460,58 @@ def build_quake_transitions_file(
                 continue
             amplitude = event.hmax if axis == "h" else event.vmax
             presets[(axis, event.time_ms, event.count, amplitude)] = None
+    return sorted(presets)
 
-    lines = ["# Generated quake transitions", ""]
+
+def build_custom_effects_file(
+    parsed_files: Sequence[Any],
+) -> str:
+    """Render the generated custom_effects.rpy content.
+
+    When no quake events are present, only the header comment is emitted so
+    the file stays tiny and self-explanatory. When quake events are present,
+    a per-axis Tyrano-quake helper is emitted (``tyrano_hquake`` for
+    horizontal, ``tyrano_vquake`` for vertical) and each unique Tyrano
+    quake preset is emitted as a static alias, for example:
+
+        define tyrano_hpunch_300_3_10 = tyrano_hquake(
+            time_ms=300, count=3, offset=10
+        )
+
+    Story files keep referencing the static alias names with `with`, so no
+    story-file rewrite is needed when the underlying helper changes.
+    """
+    presets = collect_quake_presets(parsed_files)
+
+    lines: list[str] = [CUSTOM_EFFECTS_HEADER, ""]
     if not presets:
-        lines.append("# No quake transitions were needed for this conversion run.")
+        lines.append("# No custom effects were needed for this conversion run.")
         return "\n".join(lines).rstrip() + "\n"
 
-    for axis, time_ms, count, amplitude in sorted(presets):
-        transition_name = build_quake_transition_name(axis, time_ms, count, amplitude)
-        offset_name = "xoffset" if axis == "h" else "yoffset"
-        cycle_seconds = time_ms / 1000.0
-        quarter = cycle_seconds / 4.0
-        total = cycle_seconds * count
-        lines.append(f"transform {transition_name}(old_widget=None, new_widget=None):")
-        lines.append(f"    delay {total:g}")
-        lines.append("    new_widget")
-        lines.append("    events True")
-        lines.append(f"    {offset_name} 0")
-        for _ in range(count):
-            lines.append(f"    linear {quarter:g} {offset_name} {amplitude}")
-            lines.append(f"    linear {quarter:g} {offset_name} -{amplitude}")
-            lines.append(f"    linear {quarter:g} {offset_name} {amplitude}")
-            lines.append(f"    linear {quarter:g} {offset_name} 0")
+    used_axes = {axis for axis, _, _, _ in presets}
+
+    lines.append("# Reusable Tyrano-quake helpers. Story files reference the")
+    lines.append("# generated static aliases below, not these transforms directly.")
+    if "h" in used_axes:
+        lines.append(TYRANO_HQUAKE_TRANSFORM.rstrip())
         lines.append("")
+    if "v" in used_axes:
+        lines.append(TYRANO_VQUAKE_TRANSFORM.rstrip())
+        lines.append("")
+    lines.append("# Aliases: one define per unique Tyrano quake preset.")
+    for axis, time_ms, count, amplitude in presets:
+        alias_name = build_quake_transition_name(axis, time_ms, count, amplitude)
+        helper_name = "tyrano_hquake" if axis == "h" else "tyrano_vquake"
+        lines.append(
+            f"define {alias_name} = {helper_name}("
+            f"time_ms={time_ms}, count={count}, offset={amplitude})"
+        )
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+# Backwards-compatible alias. Prefer build_custom_effects_file in new code.
+build_quake_transitions_file = build_custom_effects_file
 
 
 def render_quake_event(
@@ -758,32 +827,41 @@ def build_characters_file(parsed_files: Sequence[Any], no_speakers_message: str)
 
 
 def build_images_file(parsed_files: Sequence[Any], no_images_message: str) -> str:
-    lines = ["# Generated image declarations", ""]
-    seen_backgrounds: set[str] = set()
-    seen_characters: set[tuple[str, str]] = set()
+    # Collect all image declarations across every parsed file first so the
+    # generated file can be grouped into a Background Images section and a
+    # Character Sprites section, each sorted alphabetically instead of
+    # interleaved by traversal order.
+    background_declarations: dict[str, str] = {}
+    character_declarations: dict[tuple[str, str], str] = {}
 
     for parsed_file in parsed_files:
-        for storage, bg_name in sorted(
-            parsed_file.backgrounds.items(), key=lambda item: item[0].lower()
-        ):
-            if storage in seen_backgrounds:
-                continue
-            seen_backgrounds.add(storage)
-            lines.append(f'image bg_asset {bg_name} = "{escape_string(storage)}"')
+        for storage, bg_name in parsed_file.backgrounds.items():
+            declaration = f'image bg_asset {bg_name} = "{escape_string(storage)}"'
+            background_declarations.setdefault(storage, declaration)
 
-        for (character_name, storage), variant_name in sorted(
-            parsed_file.character_images.items(),
-            key=lambda item: (item[0][0].lower(), item[0][1].lower()),
-        ):
+        for (character_name, storage), variant_name in parsed_file.character_images.items():
             character_tag = normalize_identifier(character_name, prefix="char")
             key = (character_tag, variant_name)
-            if key in seen_characters:
-                continue
-            seen_characters.add(key)
-            lines.append(f'image {character_tag} {variant_name} = "{escape_string(storage)}"')
+            declaration = f'image {character_tag} {variant_name} = "{escape_string(storage)}"'
+            character_declarations.setdefault(key, declaration)
 
-    if len(lines) == 2:
+    lines = ["# Generated image declarations", ""]
+
+    if not background_declarations and not character_declarations:
         lines.append(no_images_message)
+        return "\n".join(lines).rstrip() + "\n"
+
+    if background_declarations:
+        lines.append("# Background Images")
+        for declaration in sorted(background_declarations.values(), key=str.lower):
+            lines.append(declaration)
+        if character_declarations:
+            lines.append("")
+
+    if character_declarations:
+        lines.append("# Character Sprites")
+        for declaration in sorted(character_declarations.values(), key=str.lower):
+            lines.append(declaration)
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -855,7 +933,7 @@ def handle_common_visual_tag(
                 f"[{tag_name}] missing storage",
             )
             return True
-        remapped_storage = remap_character_storage(storage)
+        remapped_storage = remap_character_storage(storage, character_name)
         variant_name = normalize_identifier(Path(storage).stem, prefix="variant")
         parsed_file.character_images[(character_name, remapped_storage)] = variant_name
         raw_time = parse_wait_value(attrs.get("time"))

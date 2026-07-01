@@ -101,13 +101,13 @@ Typical meaning:
 Example:
 
 ```renpy
-play music "audio/bgm/Music_Title-Artist_Name-01.ogg"
+play music "audio/music/Music_Title-Artist_Name-01.ogg"
 ```
 
-If the file is really stored in `game/audio/bgm/`, then change it to:
+If the file is really stored in `game/audio/music/`, then change it to:
 
 ```renpy
-play music "audio/bgm/Music_Title-Artist_Name-01.ogg"
+play music "audio/music/Music_Title-Artist_Name-01.ogg"
 ```
 
 What to check:

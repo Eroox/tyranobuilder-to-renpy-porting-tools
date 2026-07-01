@@ -15,6 +15,15 @@ That guide explains the full beginner workflow, including how to download the
 toolkit, run scripts, understand generated files, copy assets, and test inside a
 fresh Ren'Py project.
 
+## Compatibility
+
+These tools are currently tested against TyranoBuilder `3.0.6.c` project
+exports. Earlier TyranoBuilder versions may work, but they are not
+guaranteed because project layout, generated tags, and asset conventions
+can differ between releases.
+
+Generated Ren'Py output currently targets Ren'Py `8.5.3` or newer.
+
 ## Quick Start
 
 You do not need Git to use this toolkit.
@@ -79,7 +88,7 @@ Output includes:
 
 - `out/game/script.rpy` (Ren'Py startup wiring)
 - `out/game/story/*.rpy` (per-source-file converted scenes)
-- `out/game/characters.rpy`, `out/game/images.rpy`, `out/game/transitions.rpy`
+- `out/game/characters.rpy`, `out/game/images.rpy`, `out/game/custom_effects.rpy`
 - `out/game/options.rpy` (Ren'Py config, build name, save directory)
 - `out/game/gui.rpy` (UI styling and dimensions)
 - `out/game/screens.rpy` (say, menu, quick-menu, file-picker screens)
@@ -90,6 +99,24 @@ Output includes:
 - empty asset directories under `out/game/images/`, `out/game/audio/`, etc.
 
 This is the right tool for almost every whole-project migration scenario.
+
+**Optional: copy assets automatically with `-m` / `--migrate-assets`.**
+
+When the input is a real TyranoBuilder project root (with a `data/` folder),
+you can add `-m` (or `--migrate-assets`) to have the builder copy each
+reachable referenced asset from the Tyrano project into the generated
+Ren'Py `game/` tree. Only assets actually referenced by the traversed
+scenario files are copied. This also covers fonts referenced by
+`[font face="..."]` (copied into `game/fonts/`) and UI art referenced by
+`[button graphic=... enterimg=...]` or `[clickable _clickable_img=...]`
+(copied into `game/images/ui/`, preserving the relative subpath).
+Existing destination files are skipped rather than overwritten, and a new
+`out/game/ASSET_MIGRATION_REPORT.md` summarizes what was copied, already
+present, or missing.
+
+```bash
+python3 tyranobuilder_to_renpy_project.py path/to/your-project -o out --migrate-assets
+```
 
 ### `single_ks_file_to_screenplay_converter.py`
 
@@ -154,7 +181,7 @@ the result into another single-file workflow.
 - `out/game/story/*.rpy` (per-source-file converted scenes)
 - `out/game/characters.rpy`
 - `out/game/images.rpy`
-- `out/game/transitions.rpy`
+- `out/game/custom_effects.rpy`
 - `out/game/route_map.md`
 - `out/game/conversion_warnings.md`
 
@@ -323,10 +350,6 @@ For Ren'Py's equivalent preview workflows once your project is migrated, see
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
-Every user-facing change should add a bullet under `## [Unreleased]`. Before a
-release, rename that section to the new `## [x.y.z] - YYYY-MM-DD` version,
-create a fresh empty `## [Unreleased]` section above it, then tag the release.
-
 ## Related Docs
 
 - [Getting Started With Ren'Py For Tyrano Users](docs/GETTING_STARTED_WITH_RENPY_FOR_TYRANO_USERS.md)
@@ -334,15 +357,4 @@ create a fresh empty `## [Unreleased]` section above it, then tag the release.
 - [Supported Conversion Features](docs/CONVERT_SCRIPT_FEATURES.md)
 - [TyranoScript Tag Reference](docs/TYRANOSCRIPT_TAG_REFERENCE.md)
 - [TyranoBuilder Project Tree](docs/TYRANOBUILDER_TREE.md)
-
-## In Short
-
-If you are brand new:
-
-1. read [Getting Started With Ren'Py For Tyrano Users](docs/GETTING_STARTED_WITH_RENPY_FOR_TYRANO_USERS.md)
-2. install Python
-3. make a copy of your TyranoBuilder project
-4. run `extract_media_inventory.py`
-5. run `tyranobuilder_to_renpy_project.py`
-6. inspect the generated `out/game/` scaffold
-7. copy that into a fresh Ren'Py project and test
+- [Migrating From 0.4.2 To 0.5.0](docs/MIGRATING_FROM_0.4.2_TO_0.5.0.md)

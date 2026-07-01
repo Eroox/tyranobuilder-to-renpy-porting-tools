@@ -27,12 +27,32 @@ REFERENCED_KS_TAGS = {"jump", "call"}
 SYSTEM_KS_TAGS = {"_tb_system_call"}
 FONT_FACE_TAGS = {"font", "deffont"}
 
+# Tyrano tags that reference UI image assets through attributes other than
+# ``storage=``. ``graphic=`` and ``enterimg=`` come from [button], and
+# ``_clickable_img=`` comes from TyranoBuilder's [clickable] preview
+# metadata. These assets typically live under ``data/image/`` and belong
+# in ``game/images/ui/`` after conversion, so capturing them lets
+# ``--migrate-assets`` copy the UI art referenced by reachable scenario
+# files.
+UI_IMAGE_TAGS = {"button", "clickable", "glink"}
+UI_IMAGE_ATTRS = ("graphic", "enterimg", "_clickable_img")
+
+# File extensions we recognise as UI image assets. This is used as a
+# defensive filter so an accidental non-image value in ``graphic=``
+# (for example a Tyrano macro token) does not get treated as media.
+UI_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
 
 @dataclass
 class InventoryItem:
     value: str
     tags: set[str] = field(default_factory=set)
     line_numbers: list[int] = field(default_factory=list)
+    # For character-sprite entries, the last-seen Tyrano character name
+    # (from the ``name`` attribute of ``chara_show`` / ``chara_mod`` etc).
+    # This lets NEEDED_MEDIA reports mirror the character-named folder
+    # layout that generated images.rpy files now use.
+    character_name: str | None = None
 
     def add_reference(self, tag: str, line_number: int) -> None:
         self.tags.add(tag)
@@ -46,13 +66,24 @@ class InventoryItem:
 InventoryBucket = dict[str, InventoryItem]
 
 
-def add_item(bucket: InventoryBucket, value: str, tag: str, line_number: int) -> None:
+def add_item(
+    bucket: InventoryBucket,
+    value: str,
+    tag: str,
+    line_number: int,
+    *,
+    character_name: str | None = None,
+) -> None:
     cleaned_value = value.strip()
     if not cleaned_value:
         return
 
     item = bucket.setdefault(cleaned_value, InventoryItem(value=cleaned_value))
     item.add_reference(tag, line_number)
+    if character_name is not None:
+        cleaned_name = character_name.strip()
+        if cleaned_name:
+            item.character_name = cleaned_name
 
 
 def build_inventory() -> dict[str, InventoryBucket]:
@@ -67,6 +98,7 @@ def build_inventory() -> dict[str, InventoryBucket]:
         "referenced_ks": {},
         "system_ks": {},
         "fonts": {},
+        "ui_images": {},
         "other_file_references": {},
     }
 
@@ -125,10 +157,31 @@ def extract_inventory(path: Path) -> dict[str, InventoryBucket]:
             if tag in FONT_FACE_TAGS and "face" in attrs:
                 add_item(inventory["fonts"], attrs["face"], tag, line_number)
 
+            if tag in UI_IMAGE_TAGS:
+                # Capture UI art referenced through attributes other than
+                # ``storage=`` (for example [button graphic=... enterimg=...]).
+                # A defensive suffix filter keeps non-image attribute values
+                # out of the ``ui_images`` bucket.
+                for attr_name in UI_IMAGE_ATTRS:
+                    attr_value = attrs.get(attr_name)
+                    if not attr_value:
+                        continue
+                    suffix = Path(attr_value).suffix.lower()
+                    if suffix not in UI_IMAGE_EXTENSIONS:
+                        continue
+                    add_item(inventory["ui_images"], attr_value, tag, line_number)
+
             storage = attrs.get("storage")
             if storage:
                 bucket_name = categorize_storage_reference(tag, storage)
-                add_item(inventory[bucket_name], storage, tag, line_number)
+                sprite_character_name = attrs.get("name") if tag in SPRITE_TAGS else None
+                add_item(
+                    inventory[bucket_name],
+                    storage,
+                    tag,
+                    line_number,
+                    character_name=sprite_character_name,
+                )
 
             continue
 
@@ -214,6 +267,7 @@ def render_inventory_markdown(
         ("Referenced KS files", "referenced_ks"),
         ("System KS files", "system_ks"),
         ("Fonts / named faces", "fonts"),
+        ("UI images", "ui_images"),
         ("Other file references", "other_file_references"),
     ]
 
@@ -232,6 +286,7 @@ def render_inventory_markdown(
         ("Referenced KS Files", "referenced_ks"),
         ("System KS Files", "system_ks"),
         ("Fonts / Named Faces", "fonts"),
+        ("UI Images", "ui_images"),
         ("Other File References", "other_file_references"),
     ]
 

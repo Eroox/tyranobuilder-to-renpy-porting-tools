@@ -30,8 +30,8 @@ from tyrano_tools.scenario.shared import (
     UnsupportedEvent,
     add_warning,
     append_line,
+    build_custom_effects_file,
     build_label_name,
-    build_quake_transitions_file,
     build_transition_clause,
     consume_block_comment_line,
     finalize_script_block,
@@ -741,9 +741,9 @@ def write_outputs(parsed_files: Sequence[ParsedFile], output_dir: Path) -> List[
     images_path.write_text(build_images_file(parsed_files), encoding="utf-8")
     written_paths.append(images_path)
 
-    transitions_path = game_dir / "transitions.rpy"
-    transitions_path.write_text(build_quake_transitions_file(parsed_files), encoding="utf-8")
-    written_paths.append(transitions_path)
+    custom_effects_path = game_dir / "custom_effects.rpy"
+    custom_effects_path.write_text(build_custom_effects_file(parsed_files), encoding="utf-8")
+    written_paths.append(custom_effects_path)
 
     filename_map_path = game_dir / "filename_map.md"
     filename_map_path.write_text(

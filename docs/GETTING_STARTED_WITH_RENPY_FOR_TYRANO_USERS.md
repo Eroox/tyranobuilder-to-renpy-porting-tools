@@ -34,6 +34,17 @@ usually just:
 
 You do not need to become a full programmer before you can start migrating.
 
+## Compatibility
+
+These tools are currently tested against TyranoBuilder `3.0.6.c` project
+exports. Earlier TyranoBuilder versions may work, but they are not
+guaranteed because project layout, generated tags, and asset conventions
+can differ between releases.
+
+Generated Ren'Py output currently targets Ren'Py `8.5.3` or newer. If you
+plan to open the generated project in Ren'Py, install a matching version
+from `https://www.renpy.org/latest.html` before testing.
+
 ## Step 1: Download This Toolkit
 
 You do not need Git.
@@ -281,6 +292,29 @@ Current keymap behavior is intentionally conservative:
 If you want the strongest current starting point for a whole project, this is
 the tool to use.
 
+### Optional: Copy Assets Automatically With `--migrate-assets`
+
+By default this tool creates empty asset directories and writes a plan file
+so you can copy assets yourself. If you would rather have the tool copy
+your Tyrano assets for you, add `-m` (or `--migrate-assets`):
+
+```bash
+python3 tyranobuilder_to_renpy_project.py path/to/your-project -o out --migrate-assets
+```
+
+The tool will:
+
+- only copy assets that are actually referenced by the traversed scenario files
+- pull backgrounds from `data/bgimage/`, character sprites from `data/fgimage/`, music from `data/bgm/`, sound effects from `data/sound/`, movies from `data/video/`, fonts from `data/others/`, and UI images from `data/image/`
+- place each file at the same generated Ren'Py path that appears in `NEEDED_MEDIA.md`
+- also copy fonts referenced by `[font face="..."]` and UI art referenced by `[button graphic=... enterimg=...]` or `[clickable _clickable_img=...]`, preserving relative subpaths (for example `data/image/config/c_btn.png` becomes `game/images/ui/config/c_btn.png`)
+- skip existing destination files instead of overwriting them, so you never lose hand-edited assets
+- write `out/game/ASSET_MIGRATION_REPORT.md` with a copied / already-present / missing / conflicts summary
+
+This flag only makes sense when the input is a real TyranoBuilder project
+root (a folder that contains `data/`). It is safe to re-run: existing
+destination files are always skipped.
+
 ## If You Want One Merged `.ks` File From A Whole Project
 
 Use:
@@ -324,7 +358,7 @@ Use:
 - `out/game/story/*.rpy` (per-source-file converted scenes)
 - `out/game/characters.rpy`
 - `out/game/images.rpy`
-- `out/game/transitions.rpy`
+- `out/game/custom_effects.rpy`
 - `out/game/route_map.md`
 - `out/game/conversion_warnings.md`
 
@@ -355,7 +389,7 @@ you get a generated `game/` folder like:
 - `out/game/script.rpy`
 - `out/game/characters.rpy`
 - `out/game/images.rpy`
-- `out/game/transitions.rpy`
+- `out/game/custom_effects.rpy`
 - `out/game/filename_map.md`
 - `out/game/conversion_warnings.md`
 
@@ -396,10 +430,14 @@ This defines image names and file paths, for example:
 image bg_asset forest = "images/backgrounds/forest.png"
 ```
 
-### `game/transitions.rpy`
+### `game/custom_effects.rpy`
 
-This contains generated transitions used for supported effects, such as current
-`quake` support.
+This contains generated helpers used for supported effects, such as current
+`quake` support. A single reusable `tyrano_quake(axis, time_ms, count, offset)`
+ATL transform is defined once, and each Tyrano quake preset your project
+uses is exposed as a stable static alias (for example
+`tyrano_hpunch_300_3_10`). Story files reference the alias names, so you can
+tweak or extend the shared helper here without rewriting your story flow.
 
 ### `game/filename_map.md`
 
@@ -436,7 +474,7 @@ you get the fullest scaffold, including:
 - `out/game/keymap.rpy`
 - `out/game/characters.rpy`
 - `out/game/images.rpy`
-- `out/game/transitions.rpy`
+- `out/game/custom_effects.rpy`
 - `out/game/PROJECT_CONFIG_MAPPING.md`
 - `out/game/NEEDED_MEDIA.md`
 - `out/game/NEEDED_MEDIA_RAW.json`
@@ -459,7 +497,7 @@ you get a generated `game/` scaffold that includes:
 - `out/game/story/...`
 - `out/game/characters.rpy`
 - `out/game/images.rpy`
-- `out/game/transitions.rpy`
+- `out/game/custom_effects.rpy`
 - `out/game/route_map.md`
 - `out/game/conversion_warnings.md`
 
@@ -704,9 +742,9 @@ If you are not sure how to organize a Ren'Py project yet, this is a simple place
 to start:
 
 - `game/images/backgrounds/`
-- `game/images/character/`
+- `game/images/characters/`
 - `game/images/ui/`
-- `game/audio/bgm/`
+- `game/audio/music/`
 - `game/audio/sfx/`
 - `game/movies/`
 - `game/fonts/`

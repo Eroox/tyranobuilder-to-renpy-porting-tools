@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-01
+
+> Heads-up: `0.5.0` is a breaking release for anyone regenerating on top
+> of a `0.4.2` output tree. The generated Ren'Py folder layout was
+> tightened to align more closely with Ren'Py's own example projects and
+> to be a little more opinionated about where assets live. This work also
+> sets the stage for an upcoming Ren'Py-focused UI that assumes the new
+> layout. See `docs/MIGRATING_FROM_0.4.2_TO_0.5.0.md` for the step-by-step
+> upgrade path.
+
+### Breaking Changes
+- Generated music folder renamed from `game/audio/bgm/` to
+  `game/audio/music/`.
+- Generated character sprite folder renamed from `game/images/character/`
+  to `game/images/characters/`.
+- Character sprite subfolders now use the character name instead of
+  Tyrano's numeric folder, for example
+  `game/images/characters/eileen/smile.png` instead of
+  `game/images/character/1/smile.png`.
+- Renamed generated `game/transitions.rpy` to `game/custom_effects.rpy`.
+  Story files keep their existing `with tyrano_hpunch_*` references.
+- `game/options.rpy` no longer defines `config.history_length`. That
+  setting now lives only in `game/gui.rpy`, which is where Ren'Py
+  expects it.
+- Generated `game/options.rpy` now ships a fuller build classification
+  block, including active `archive` rules for images, audio, fonts,
+  movies, and compiled scripts. If you had customized the previous
+  minimal block, port your edits into the new one.
+
+### Added
+- Added `-m` / `--migrate-assets` to `tyranobuilder_to_renpy_project.py`.
+  When the input is a real TyranoBuilder project root (with a `data/`
+  folder), the builder now copies each reachable referenced asset from
+  the Tyrano project into the generated Ren'Py `game/` tree. Only assets
+  actually referenced by the traversed scenario files are copied,
+  existing destination files are skipped instead of overwritten, and a
+  new `game/ASSET_MIGRATION_REPORT.md` summarizes what was copied,
+  skipped, or missing.
+- Extended `--migrate-assets` to also copy fonts referenced by
+  `[font face="..."]` and UI images referenced by
+  `[button graphic=... enterimg=...]` / `[clickable _clickable_img=...]`.
+  Fonts land in `game/fonts/` (preserving the on-disk suffix so `.otf`
+  faces stay `.otf`), and UI images land in `game/images/ui/` with the
+  original relative subpath preserved (for example
+  `data/image/config/c_btn.png` becomes `game/images/ui/config/c_btn.png`).
+- Added a `UI Images` section to `game/NEEDED_MEDIA.md` and
+  `game/NEEDED_MEDIA_RAW.json` for the same references. The standalone
+  `extract_media_inventory.py` output also gains a `UI Images` section.
+- Sorted `game/images.rpy` into a Background Images section and a
+  Character Sprites section, each in alphabetical order, so hand-editing
+  and diffing are easier.
+- Added `docs/MIGRATING_FROM_0.4.2_TO_0.5.0.md` with the manual steps
+  users need to take when regenerating a project on top of a `0.4.2`
+  output tree.
+- Documented current compatibility expectations in `README.md` and
+  `docs/GETTING_STARTED_WITH_RENPY_FOR_TYRANO_USERS.md`: the tools are
+  tested against TyranoBuilder `3.0.6.c` project exports, and generated
+  Ren'Py output targets Ren'Py `8.5.3` or newer.
+
 ## [0.4.2] - 2026.06.10
 
 ### Added

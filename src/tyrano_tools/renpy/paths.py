@@ -48,18 +48,25 @@ def remap_background_storage(storage: str) -> str:
     return f"images/backgrounds/{Path(storage).name}"
 
 
-def remap_character_storage(storage: str) -> str:
-    storage_path = Path(storage)
-    parts = list(storage_path.parts)
-    if parts and parts[0].lower() == "chara":
-        parts = parts[1:]
-    relative_path = Path(*parts) if parts else Path(storage_path.name)
-    return str(Path("images") / "character" / relative_path).replace("\\", "/")
+def remap_character_storage(storage: str, character_name: str | None = None) -> str:
+    # New generated path shape:
+    # ``images/characters/<character_name>/<sprite_filename>``.
+    # ``character_name`` is normalized so folder names are Ren'Py-safe and
+    # consistent with the character identifiers used elsewhere. When the
+    # caller cannot supply a character name, the sprite falls back to
+    # ``images/characters/unknown/<sprite_filename>`` so paths stay
+    # deterministic and beginner-safe.
+    sprite_filename = Path(storage).name
+    if character_name is not None and character_name.strip():
+        character_folder = normalize_identifier(character_name, prefix="character")
+    else:
+        character_folder = "unknown"
+    return f"images/characters/{character_folder}/{sprite_filename}"
 
 
 def remap_audio_storage(storage: str, channel: str) -> str:
     filename = Path(storage).name
-    audio_subdir = "bgm" if channel == "music" else "sfx"
+    audio_subdir = "music" if channel == "music" else "sfx"
     return f"audio/{audio_subdir}/{filename}"
 
 

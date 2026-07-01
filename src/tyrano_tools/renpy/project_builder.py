@@ -7,10 +7,11 @@ import argparse
 import json
 import os
 import re
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, cast
+from typing import Any, Dict, Iterable, List, Optional, Tuple, cast
 
 from tyrano_tools.inventory.media import extract_inventory
 from tyrano_tools.renpy.paths import (
@@ -40,9 +41,9 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 ASSET_DIRECTORIES = [
     "images/backgrounds",
-    "images/character",
+    "images/characters",
     "images/ui",
-    "audio/bgm",
+    "audio/music",
     "audio/sfx",
     "movies",
     "fonts",
@@ -382,6 +383,19 @@ def parse_args() -> argparse.Namespace:
             "this when TyranoBuilder's 'Preview from here' feature has "
             "replaced first.ks with a _preview.ks jump (for example pass "
             "--entry title_screen.ks)."
+        ),
+    )
+    parser.add_argument(
+        "-m",
+        "--migrate-assets",
+        action="store_true",
+        help=(
+            "Copy reachable referenced assets (backgrounds, character sprites, "
+            "BGM, SFX, movies) from the TyranoBuilder project's data/ folder "
+            "into the generated Ren'Py game/ tree. Existing destination files "
+            "are skipped rather than overwritten. Only assets actually "
+            "referenced by the traversed scenario files are copied. A "
+            "game/ASSET_MIGRATION_REPORT.md summarizes what happened."
         ),
     )
     return parser.parse_args()
@@ -882,7 +896,7 @@ def build_config_mapping_rows(
         (
             "maxBackLogNum",
             settings.get("maxBackLogNum"),
-            "options.rpy / gui.rpy -> config.history_length",
+            "gui.rpy -> config.history_length",
         ),
         (
             "defaultFontSize",
@@ -1212,7 +1226,6 @@ def build_options_rpy(template: str, settings: Dict[str, Any]) -> str:
     save_directory = f"{build_name}-{resolve_save_directory_timestamp()}"
     text_cps = max(1, round(1000 / max(as_int(settings, "chSpeed", 30), 1)))
     afm_time = max(0, min(30, round(as_int(settings, "autoSpeed", 1300) / 100)))
-    history_length = as_int(settings, "maxBackLogNum", 50)
     has_music = True
     has_sound = True
     has_voice = False
@@ -1264,15 +1277,18 @@ def build_options_rpy(template: str, settings: Dict[str, Any]) -> str:
     )
     content = content.replace(f'define config.version = "{version}"', version_block, 1)
 
-    history_block = (
-        f"define config.history_length = {history_length}\n"
+    # config.history_length is generated into gui.rpy, which is where Ren'Py
+    # expects it and where the shipped Ren'Py starter template already
+    # defines it. The Tyrano-derived skip/audio defaults live here instead
+    # so they land next to the other preference defaults.
+    preferences_block = (
         "default preferences.skip_unseen = True\n"
         f"default preferences.music_volume = {default_music_volume:.2f}\n"
         f"default preferences.sound_volume = {default_sound_volume:.2f}\n"
         f"# Source Tyrano movie volume default: "
         f"{as_int(settings, 'defaultMovieVolume', 100)}\n\n\n## Save directory"
     )
-    content = content.replace("## Save directory", history_block, 1)
+    content = content.replace("## Save directory", preferences_block, 1)
     return content
 
 
@@ -1302,11 +1318,16 @@ def ensure_asset_directories(game_dir: Path) -> List[Path]:
     return created
 
 
-def infer_media_target_path(bucket: str, source_value: str) -> str:
+def infer_media_target_path(
+    bucket: str,
+    source_value: str,
+    *,
+    character_name: str | None = None,
+) -> str:
     if bucket == "backgrounds":
         return remap_background_storage(source_value)
     if bucket == "character_sprites":
-        return remap_character_storage(source_value)
+        return remap_character_storage(source_value, character_name)
     if bucket == "bgm":
         return remap_audio_storage(source_value, "music")
     if bucket == "sfx":
@@ -1318,6 +1339,13 @@ def infer_media_target_path(bucket: str, source_value: str) -> str:
             Path(source_value).name if "." in Path(source_value).name else source_value + ".ttf"
         )
         return f"fonts/{filename}"
+    if bucket == "ui_images":
+        # UI images are placed under ``images/ui/`` while preserving the
+        # relative subpath from Tyrano. ``config/c_btn.png`` becomes
+        # ``images/ui/config/c_btn.png`` so hand-editable layouts keep
+        # their original grouping.
+        relative = source_value.replace("\\", "/").lstrip("/")
+        return f"images/ui/{relative}"
     if bucket == "other_file_references":
         suffix = Path(source_value).suffix.lower()
         if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
@@ -1342,7 +1370,11 @@ def merge_inventory(paths: Iterable[Path]) -> Dict[str, Dict[str, Dict[str, Any]
                         "count": 0,
                         "sources": [],
                         "tags": [],
-                        "target_path": infer_media_target_path(bucket, value),
+                        "target_path": infer_media_target_path(
+                            bucket,
+                            value,
+                            character_name=item.character_name,
+                        ),
                     },
                 )
                 entry["count"] += item.count
@@ -1352,6 +1384,15 @@ def merge_inventory(paths: Iterable[Path]) -> Dict[str, Dict[str, Dict[str, Any]
                 for tag in sorted(item.tags):
                     if tag not in entry["tags"]:
                         entry["tags"].append(tag)
+                # Once we learn the character name for a sprite reference,
+                # keep the target path aligned with the named-folder layout
+                # so late traversals do not stay on the ``unknown`` fallback.
+                if bucket == "character_sprites" and item.character_name:
+                    entry["target_path"] = infer_media_target_path(
+                        bucket,
+                        value,
+                        character_name=item.character_name,
+                    )
     return combined
 
 
@@ -1363,6 +1404,7 @@ def render_needed_media_markdown(inventory: Dict[str, Dict[str, Dict[str, Any]]]
         ("sfx", "SFX"),
         ("movies", "Movies"),
         ("fonts", "Fonts / Faces"),
+        ("ui_images", "UI Images"),
         ("other_file_references", "Other File References"),
     ]
     lines = [
@@ -1388,16 +1430,36 @@ def render_needed_media_markdown(inventory: Dict[str, Dict[str, Dict[str, Any]]]
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_asset_plan_markdown(inventory: Dict[str, Dict[str, Dict[str, Any]]]) -> str:
-    lines = [
-        "# Asset Migration Plan",
-        "",
-        "The builder created the target directories below, but it did not copy assets yet.",
-        "Use this plan to move or verify files before testing the generated Ren'Py project.",
-        "",
-        "## Suggested Directories",
-        "",
-    ]
+def render_asset_plan_markdown(
+    inventory: Dict[str, Dict[str, Dict[str, Any]]],
+    *,
+    assets_migrated: bool = False,
+) -> str:
+    if assets_migrated:
+        intro_lines = [
+            (
+                "The builder created the target directories below and copied each "
+                "reachable referenced asset from the Tyrano project when a matching "
+                "source file was found."
+            ),
+            (
+                "Use `game/ASSET_MIGRATION_REPORT.md` to see exactly what was copied, "
+                "already present, or missing."
+            ),
+        ]
+    else:
+        intro_lines = [
+            ("The builder created the target directories below, but it did not copy assets yet."),
+            (
+                "Use this plan to move or verify files before testing the generated "
+                "Ren'Py project. To copy assets automatically, re-run the builder "
+                "with `--migrate-assets` (or `-m`)."
+            ),
+        ]
+
+    lines = ["# Asset Migration Plan", ""]
+    lines.extend(intro_lines)
+    lines.extend(["", "## Suggested Directories", ""])
     for relative_path in ASSET_DIRECTORIES:
         lines.append(f"- `game/{relative_path}/`")
     lines.extend(
@@ -1406,12 +1468,12 @@ def render_asset_plan_markdown(inventory: Dict[str, Dict[str, Dict[str, Any]]]) 
             "## Category Hints",
             "",
             "- Backgrounds -> `game/images/backgrounds/`",
-            "- Character sprites -> `game/images/character/`",
+            "- Character sprites -> `game/images/characters/`",
             (
                 "- UI/button/title/config art -> `game/images/ui/` or `game/gui/` "
                 "depending on how you want to organize Ren'Py assets"
             ),
-            "- BGM -> `game/audio/bgm/`",
+            "- BGM -> `game/audio/music/`",
             "- SFX -> `game/audio/sfx/`",
             "- Movies -> `game/movies/`",
             "- Fonts -> `game/fonts/`",
@@ -1427,8 +1489,304 @@ def render_asset_plan_markdown(inventory: Dict[str, Dict[str, Dict[str, Any]]]) 
         ("sfx", "SFX"),
         ("movies", "Movies"),
         ("fonts", "Fonts / faces"),
+        ("ui_images", "UI images"),
     ]:
         lines.append(f"- {label}: {len(inventory.get(key, {}))}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+# Ordered list of relative subdirectories inside a TyranoBuilder project's
+# ``data/`` folder to check when resolving an inventory source path for a
+# given bucket. First hit wins. Extra fallbacks are included because
+# TyranoBuilder does not always agree with itself: some projects store
+# sprite folders under ``fgimage`` while others use ``chara``, some ship
+# sound effects under ``sound`` while others use ``se``, and BGM can live
+# under ``bgm`` or ``music``.
+TYRANO_ASSET_SOURCE_DIRS: Dict[str, Tuple[str, ...]] = {
+    "backgrounds": ("bgimage", "image"),
+    "character_sprites": ("fgimage", "chara"),
+    "bgm": ("bgm", "music"),
+    "sfx": ("sound", "se"),
+    "movies": ("video", "movie"),
+    "fonts": ("others", "font", "fonts"),
+    "ui_images": ("image", "bgimage", "fgimage", "others"),
+    "other_file_references": (
+        "image",
+        "bgimage",
+        "fgimage",
+        "sound",
+        "bgm",
+        "video",
+        "others",
+    ),
+}
+
+MIGRATE_ASSETS_SUPPORTED_BUCKETS = (
+    "backgrounds",
+    "character_sprites",
+    "bgm",
+    "sfx",
+    "movies",
+    "fonts",
+    "ui_images",
+    "other_file_references",
+)
+
+# Extensions the font resolver appends when the scenario references a
+# face by name rather than by filename (for example ``[font
+# face="GhoulFriAOE"]``). Order matters: ``.ttf`` is checked first
+# because TyranoBuilder projects most commonly ship TrueType fonts.
+FONT_FILENAME_EXTENSIONS = (".ttf", ".otf", ".woff", ".woff2")
+
+
+@dataclass
+class AssetMigrationOutcome:
+    copied: List[Tuple[str, Path, Path]] = field(default_factory=list)
+    already_present: List[Tuple[str, Path, Path]] = field(default_factory=list)
+    missing_sources: List[Tuple[str, str, List[Path]]] = field(default_factory=list)
+    conflicts: List[Tuple[str, Path, Path]] = field(default_factory=list)
+    skipped_buckets: List[str] = field(default_factory=list)
+
+
+# When a scenario tag stores an asset path with a leading Tyrano folder
+# prefix (for example ``chara/1/foo.png`` or ``bgm/theme.ogg``), the
+# candidate resolver also tries the same path with the recognised prefix
+# stripped. This lets ``chara/1/foo.png`` resolve against
+# ``data/fgimage/1/foo.png`` even though Tyrano itself did not write the
+# ``fgimage/`` prefix into the tag.
+TYRANO_STRIPPABLE_STORAGE_PREFIXES = (
+    "chara",
+    "fgimage",
+    "bgimage",
+    "image",
+    "bgm",
+    "music",
+    "sound",
+    "se",
+    "video",
+    "movie",
+    "others",
+    "font",
+    "fonts",
+)
+
+
+def _iter_candidate_source_paths(
+    project_root: Path,
+    bucket: str,
+    source_value: str,
+) -> Iterable[Path]:
+    # Try the storage value in three shapes under each candidate Tyrano
+    # data subdirectory, from most specific to most generic:
+    #   1. the storage value as-is (``chara/1/foo.png``)
+    #   2. the storage value with a leading Tyrano folder prefix stripped
+    #      (``1/foo.png`` when the input was ``chara/1/foo.png``)
+    #   3. just the bare filename (``foo.png``)
+    # This mirrors how Tyrano projects reference the same asset from
+    # different tags and lets us find nested folder layouts before falling
+    # back to top-level basename matches.
+    data_root = project_root / "data"
+    normalized = source_value.replace("\\", "/").lstrip("/")
+    storage_path = Path(normalized)
+    candidate_relatives: List[Path] = [storage_path]
+
+    parts = storage_path.parts
+    if len(parts) > 1 and parts[0].lower() in TYRANO_STRIPPABLE_STORAGE_PREFIXES:
+        stripped = Path(*parts[1:])
+        if stripped not in candidate_relatives:
+            candidate_relatives.append(stripped)
+
+    if storage_path.name and Path(storage_path.name) not in candidate_relatives:
+        candidate_relatives.append(Path(storage_path.name))
+
+    # ``[font face="GhoulFriAOE"]`` records the face by name, not by
+    # filename. When resolving font sources we try the bare name with
+    # each known font extension appended so ``data/others/GhoulFriAOE.ttf``
+    # still resolves. This only kicks in when the input has no suffix so
+    # face names that already include ``.ttf`` are not double-suffixed.
+    if bucket == "fonts" and not storage_path.suffix:
+        for extension in FONT_FILENAME_EXTENSIONS:
+            named = Path(storage_path.name + extension)
+            if named not in candidate_relatives:
+                candidate_relatives.append(named)
+
+    seen: set[Path] = set()
+    for subdir in TYRANO_ASSET_SOURCE_DIRS.get(bucket, ()):
+        base = data_root / subdir
+        for relative in candidate_relatives:
+            candidate = (base / relative).resolve()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            yield candidate
+
+
+def resolve_asset_source_path(
+    project_root: Path,
+    bucket: str,
+    source_value: str,
+) -> Optional[Path]:
+    for candidate in _iter_candidate_source_paths(project_root, bucket, source_value):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _files_look_identical(source: Path, destination: Path) -> bool:
+    # File size is used as a cheap, portable "same file" heuristic. This
+    # keeps the copy pass fast on large asset trees and avoids hashing
+    # every candidate. A stricter policy would compare content, but
+    # skip-on-conflict is the documented behavior so treating size
+    # matches as "already present" is intentional and conservative.
+    try:
+        return source.stat().st_size == destination.stat().st_size
+    except OSError:
+        return False
+
+
+def copy_reachable_assets(
+    project_root: Path,
+    game_dir: Path,
+    inventory: Dict[str, Dict[str, Dict[str, Any]]],
+) -> AssetMigrationOutcome:
+    outcome = AssetMigrationOutcome()
+    for bucket, entries in inventory.items():
+        if bucket not in MIGRATE_ASSETS_SUPPORTED_BUCKETS:
+            if entries:
+                outcome.skipped_buckets.append(bucket)
+            continue
+        for source_value, entry in entries.items():
+            # ``other_file_references`` also collects scenario ``.ks`` files
+            # (for example jump targets that Tyrano stores without a
+            # dedicated tag). Those are not media assets and should not
+            # be copied by ``--migrate-assets``; the converter emits its
+            # own ``story/*.rpy`` files for them.
+            if bucket == "other_file_references":
+                if Path(source_value).suffix.lower() == ".ks":
+                    continue
+
+            target_path = entry.get("target_path")
+            if not target_path or target_path == source_value:
+                # ``other_file_references`` may fall through infer_media_target_path
+                # unchanged, in which case we cannot safely place the file.
+                candidates = list(_iter_candidate_source_paths(project_root, bucket, source_value))
+                outcome.missing_sources.append((bucket, source_value, candidates))
+                continue
+
+            resolved_source = resolve_asset_source_path(project_root, bucket, source_value)
+            if resolved_source is None:
+                candidates = list(_iter_candidate_source_paths(project_root, bucket, source_value))
+                outcome.missing_sources.append((bucket, source_value, candidates))
+                continue
+
+            # Fonts referenced by face name assume ``.ttf`` for the target
+            # path. When the on-disk file uses a different suffix we honor
+            # the real extension so the copied file is a valid font, not a
+            # mis-suffixed rename.
+            if bucket == "fonts":
+                target_suffix = Path(target_path).suffix.lower()
+                source_suffix = resolved_source.suffix.lower()
+                if source_suffix and source_suffix != target_suffix:
+                    target_path = str(Path(target_path).with_suffix(resolved_source.suffix))
+
+            destination = (game_dir / target_path).resolve()
+
+            if destination.exists():
+                if _files_look_identical(resolved_source, destination):
+                    outcome.already_present.append((bucket, resolved_source, destination))
+                else:
+                    outcome.conflicts.append((bucket, resolved_source, destination))
+                continue
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(resolved_source, destination)
+            outcome.copied.append((bucket, resolved_source, destination))
+
+    outcome.copied.sort(key=lambda item: (item[0], str(item[2])))
+    outcome.already_present.sort(key=lambda item: (item[0], str(item[2])))
+    outcome.conflicts.sort(key=lambda item: (item[0], str(item[2])))
+    outcome.missing_sources.sort(key=lambda item: (item[0], item[1]))
+    outcome.skipped_buckets.sort()
+    return outcome
+
+
+def render_asset_migration_report_markdown(
+    outcome: AssetMigrationOutcome,
+    game_dir: Path,
+    project_root: Path,
+) -> str:
+    def rel_to_game(path: Path) -> str:
+        try:
+            return f"game/{path.resolve().relative_to(game_dir.resolve())}"
+        except ValueError:
+            return str(path)
+
+    def rel_to_project(path: Path) -> str:
+        try:
+            return str(path.resolve().relative_to(project_root.resolve()))
+        except ValueError:
+            return str(path)
+
+    lines = [
+        "# Asset Migration Report",
+        "",
+        (
+            "Generated when running `tyranobuilder_to_renpy_project.py` with "
+            "`--migrate-assets`. Existing destination files were skipped rather "
+            "than overwritten."
+        ),
+        "",
+        "## Summary",
+        "",
+        f"- Copied: {len(outcome.copied)}",
+        f"- Already present (skipped): {len(outcome.already_present)}",
+        f"- Missing sources: {len(outcome.missing_sources)}",
+        f"- Conflicts (skipped, differing size): {len(outcome.conflicts)}",
+        f"- Skipped buckets: {len(outcome.skipped_buckets)}",
+        "",
+    ]
+
+    def append_section(title: str, entries: List[Tuple[str, Path, Path]]) -> None:
+        lines.append(f"## {title}")
+        lines.append("")
+        if not entries:
+            lines.append("- None")
+            lines.append("")
+            return
+        for bucket, source, destination in entries:
+            lines.append(
+                f"- `{bucket}`: `{rel_to_project(source)}` -> `{rel_to_game(destination)}`"
+            )
+        lines.append("")
+
+    append_section("Copied", outcome.copied)
+    append_section("Already Present", outcome.already_present)
+    append_section(
+        "Conflicts (existing file with different size, left in place)",
+        outcome.conflicts,
+    )
+
+    lines.append("## Missing Sources")
+    lines.append("")
+    if not outcome.missing_sources:
+        lines.append("- None")
+        lines.append("")
+    else:
+        for bucket, source_value, candidates in outcome.missing_sources:
+            lines.append(f"- `{bucket}`: `{source_value}`")
+            if candidates:
+                lines.append("  - Tried:")
+                for candidate in candidates:
+                    lines.append(f"    - `{rel_to_project(candidate)}`")
+        lines.append("")
+
+    lines.append("## Skipped Buckets")
+    lines.append("")
+    if not outcome.skipped_buckets:
+        lines.append("- None")
+    else:
+        for bucket in outcome.skipped_buckets:
+            lines.append(f"- `{bucket}`")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -1525,7 +1883,13 @@ def write_project_files(
     return [options_path, gui_path, screens_path, script_path, keymap_path]
 
 
-def build_project(input_path: Path, output_dir: Path, explicit_entry: Optional[str]) -> List[Path]:
+def build_project(
+    input_path: Path,
+    output_dir: Path,
+    explicit_entry: Optional[str],
+    *,
+    migrate_assets: bool = False,
+) -> List[Path]:
     project_root = input_path.resolve()
     scenario_dir = resolve_scenario_dir(input_path)
     entry_file = resolve_entry_file(scenario_dir, explicit_entry).resolve()
@@ -1565,8 +1929,21 @@ def build_project(input_path: Path, output_dir: Path, explicit_entry: Optional[s
     media_raw_path.write_text(json.dumps(inventory, indent=2, sort_keys=True), encoding="utf-8")
     written_paths.append(media_raw_path)
 
+    migration_outcome: Optional[AssetMigrationOutcome] = None
+    if migrate_assets:
+        migration_outcome = copy_reachable_assets(project_root, game_dir, inventory)
+        migration_report_path = game_dir / "ASSET_MIGRATION_REPORT.md"
+        migration_report_path.write_text(
+            render_asset_migration_report_markdown(migration_outcome, game_dir, project_root),
+            encoding="utf-8",
+        )
+        written_paths.append(migration_report_path)
+
     asset_plan_path = game_dir / "ASSET_MIGRATION_PLAN.md"
-    asset_plan_path.write_text(render_asset_plan_markdown(inventory), encoding="utf-8")
+    asset_plan_path.write_text(
+        render_asset_plan_markdown(inventory, assets_migrated=migrate_assets),
+        encoding="utf-8",
+    )
     written_paths.append(asset_plan_path)
 
     config_mapping_path = game_dir / "PROJECT_CONFIG_MAPPING.md"
@@ -1591,7 +1968,12 @@ def build_project(input_path: Path, output_dir: Path, explicit_entry: Optional[s
 
 def main() -> None:
     args = parse_args()
-    written_paths = build_project(args.input, args.out_dir, args.entry)
+    written_paths = build_project(
+        args.input,
+        args.out_dir,
+        args.entry,
+        migrate_assets=args.migrate_assets,
+    )
     print("Wrote outputs:")
     for written_path in written_paths:
         print(f"- {written_path}")
